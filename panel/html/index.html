@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' file:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yato Twitch Timestamp</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <main>
+    <div class="toolbar-row">
+      <button id="pickCsv" class="small secondary" type="button" title="同期 CSV を選択" aria-label="同期 CSV を選択">CSV</button>
+      <div class="offset-control">
+        <button id="offsetBtn" class="small secondary icon-label-button" type="button" title="オフセット" aria-label="オフセット" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.5V8l2.5 1.5"></path></svg>
+          <span id="offsetLabel" hidden></span>
+        </button>
+        <div id="offsetPopover" class="offset-popover" role="dialog" aria-label="オフセット" hidden>
+          <input id="offsetInput" type="text" placeholder="hh:mm:ss:ff" autocomplete="off">
+          <div id="offsetSeconds" class="offset-seconds">= 0 秒</div>
+          <div id="offsetError" class="offset-error" aria-live="polite"></div>
+          <div class="offset-buttons">
+            <button id="offsetMinusSec" class="secondary" type="button">−1s</button>
+            <button id="offsetPlusSec" class="secondary" type="button">+1s</button>
+            <button id="offsetMinusFrame" class="secondary" type="button">−1f</button>
+            <button id="offsetPlusFrame" class="secondary" type="button">+1f</button>
+          </div>
+          <button id="offsetReset" class="secondary offset-reset" type="button">0 リセット</button>
+        </div>
+      </div>
+      <select id="stream" hidden disabled><option value="">CSV を選択してください</option></select>
+      <button id="refreshBtn" class="small secondary icon-button" type="button" title="更新" aria-label="更新">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5V1.5L11.6 3A6 6 0 1 0 14 8"></path><path d="M13 1.5H9.5"></path></svg>
+      </button>
+    </div>
+
+    <div class="action-row">
+      <button id="linkTarget" class="secondary" type="button" disabled>紐付け</button>
+      <button id="addMarkerBtn" class="secondary" type="button" title="再生位置にマーカーを追加" disabled>＋追加</button>
+      <button id="syncBtn" class="primary" type="button" title="同期" disabled>同期</button>
+    </div>
+
+    <div id="log" class="log" role="button" tabindex="0" aria-expanded="false">
+      <div id="linkState" class="log-line" title=""></div>
+      <div id="status" class="status log-line" aria-live="polite" title=""></div>
+      <div id="logHistory" class="log-history" hidden></div>
+    </div>
+
+    <section id="previewDrawer" class="preview-drawer" hidden>
+      <button id="closePreview" class="small secondary icon-button close-preview" type="button" aria-label="閉じる" title="閉じる">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"></path></svg>
+      </button>
+      <div id="warnings" class="warnings" aria-live="polite"></div>
+      <label id="confirmDeleteRow" class="checkbox-row danger" hidden>
+        <input id="confirmDelete" type="checkbox">
+        <span>大量削除を確認しました（削除 0 件）</span>
+      </label>
+      <section id="previewList" class="preview-list" aria-live="polite"></section>
+      <label class="checkbox-row compact" title="未タグのマーカーも CSV に追加">
+        <input id="addUntagged" type="checkbox" checked>
+        <span>未タグのマーカーも CSV に追加</span>
+      </label>
+      <button id="executeBtn" class="primary execute-button" type="button" disabled>この内容で同期</button>
+    </section>
+
+    <section id="markerList" class="marker-list" aria-label="マーカー一覧"></section>
+  </main>
+  <script src="../js/libs/CSInterface.js"></script>
+  <script src="../js/lib.js"></script>
+  <script src="../js/main.js"></script>
+</body>
+</html>

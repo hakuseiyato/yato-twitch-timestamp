@@ -1,0 +1,5 @@
+.agents/
+*.tmp
+*.bak
+node_modules/
+dist/

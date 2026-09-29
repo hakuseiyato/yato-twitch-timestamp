@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yato Twitch Timestamp</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Yato Twitch Timestamp</h1>
+    <div id="auth-row">
+      <span id="auth-status">未ログイン</span>
+      <button id="auth-button" type="button">ログイン</button>
+    </div>
+  </header>
+
+  <section aria-labelledby="settings-title">
+    <h2 id="settings-title">設定</h2>
+    <label>Client ID<input id="client-id" type="text" autocomplete="off"></label>
+    <div class="number-row">
+      <label>遅延（秒）<input id="lag-sec" type="number" min="0" step="0.1"></label>
+    </div>
+    <button id="save-settings" type="button">保存</button>
+    <p class="hint">Redirect URL: <code id="redirect-url"></code></p>
+    <p class="hint">Twitch 開発者コンソールの OAuth Redirect URL に登録してください</p>
+  </section>
+
+  <section aria-labelledby="import-title">
+    <h2 id="import-title">取り込み</h2>
+    <label class="file-label">CSV を取り込む<input id="csv-import" type="file" accept=".csv,text/csv" multiple></label>
+  </section>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section aria-labelledby="streams-title">
+    <h2 id="streams-title">保存済み配信</h2>
+    <div id="streams"></div>
+  </section>
+
+  <script src="lib.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

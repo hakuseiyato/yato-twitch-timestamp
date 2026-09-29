@@ -1,0 +1,76 @@
+#yts-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483000;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px 6px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(24, 24, 27, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  color: #efeff1;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#yts-handle {
+  padding: 4px 2px;
+  color: #adadb8;
+  font-size: 12px;
+  letter-spacing: -2px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+#yts-handle:hover { color: #efeff1; }
+#yts-panel.yts-dragging, #yts-panel.yts-dragging #yts-handle { cursor: grabbing; }
+#yts-panel.yts-dragging { opacity: 0.85; }
+
+#yts-memo[hidden] { display: none; }
+
+#yts-memo {
+  box-sizing: border-box;
+  width: 220px;
+  padding: 8px 10px;
+  border: 1px solid #53535f;
+  border-radius: 6px;
+  outline: none;
+  background: #0e0e10;
+  color: #efeff1;
+}
+
+#yts-memo:focus { border-color: #bf94ff; }
+
+#yts-stamp {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #9147ff;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#yts-stamp:hover { background: #772ce8; }
+#yts-stamp:disabled { cursor: wait; opacity: 0.6; }
+
+#yts-toast {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: none;
+  width: max-content;
+  max-width: 320px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: #1f6f43;
+  color: #fff;
+  white-space: pre-line;
+}
+
+#yts-toast.yts-visible { display: block; }
+#yts-toast.yts-error { background: #b42318; }

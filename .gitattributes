@@ -1,0 +1,2 @@
+# Store files byte-for-byte: CSV samples contain LF inside quoted fields and jsx files need their UTF-8 BOM.
+* -text

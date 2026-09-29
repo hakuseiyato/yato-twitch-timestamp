@@ -1,0 +1,5 @@
+﻿id,timecode,offset_sec,by,memo,native,channel,stream_id,started_at,created_at,updated_at,deleted,clock_skew_ms
+ybd6c12b,00:00:12,12,editor,Opening,true,alpha,stream123,2026-01-02T03:04:05Z,2026-01-02T03:04:17Z,2026-01-02T03:04:17Z,false,0
+y0bef92b,00:01:30,90,moderator,"見どころ, ""すごい""
+二行目",false,alpha,stream123,2026-01-02T03:04:05Z,2026-01-02T03:05:35Z,2026-01-02T03:05:35Z,false,120
+yf0f186b,01:01:01,3661,editor,Boss fight,true,alpha,stream123,2026-01-02T03:04:05Z,2026-01-02T04:05:06Z,2026-01-02T04:05:06Z,false,-80
