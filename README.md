@@ -82,11 +82,27 @@ A sync file does not have to come from the Chrome extension. Open the sequence (
 
 Current DualPlayer builds export the sync format directly. Older builds wrote `Timecode, Seconds, Note, Has Screenshot, Thumbnail (Base64)` (comma- or tab-separated); the panel recognizes that format:
 
-- Picking such a file with "CSV" asks whether to convert it. The original is never modified; the converted rows go to `<name>_sync.csv` next to it (merged if that file already exists, so re-exports can be imported again). Then link a sequence and sync as usual.
+- Picking such a file with "CSV" converts it without asking (the original is never modified) into `<name>_sync.csv` next to it, merged into that file if it already exists so re-exports can be imported again. The panel then links the open sequence if it is not linked yet and syncs (see "Fewer clicks" below).
 - Selecting it in "統合" converts and merges it into the current sync file.
 - Conversion: `offset_sec` = `Seconds`, `memo` = `Note`, `by` = `dualplayer`, `channel` = the CSV's folder name, `stream_id` = `dual-<hash of the folder path>`, `created_at`/`updated_at` = the file's modification time. IDs are derived from the stream and the time, so the same stamp keeps its ID across re-exports and an edited note merges as an update. Thumbnails are not imported.
 
 Any other CSV is rejected with a message naming the file; use "新規" to start a sync file from a sequence's markers.
+
+### Import rules (merge and DualPlayer re-import)
+
+Imports never undo work done in Premiere / After Effects:
+
+- A row deleted in the app (a `deleted=true` tombstone) is never revived by an import.
+- DualPlayer rows only carry the export file's time, so they replace a row only while it is still exactly as imported (never edited by a sync). Notes edited in DualPlayer therefore update untouched rows, but a marker moved, renamed or deleted in the app keeps the app's version. The log counts these as "編集済みのため取り込まなかった".
+- Rows with real per-row times (moderators' Chrome-extension CSVs) follow "later `updated_at` wins".
+- An ID that already exists under a different stream is re-keyed to a stable new ID instead of overwriting the other stream.
+- The automatic sync after a CSV pick / conversion / merge runs without asking only when it adds markers or rows; any update or deletion stops at the confirm drawer ("取り込み後の変更").
+
+DualPlayer limitations: a stamp's ID comes from its time, so moving or deleting a stamp in DualPlayer is not propagated (a moved stamp becomes a new marker; edit or delete the old one in the app). Stamps at the same millisecond are told apart by their order in the file, so deleting or reordering one of them in DualPlayer can shift which note maps to which marker. The DualPlayer stream is derived from the folder the CSV is in; moving the footage folder makes re-imports appear as a separate stream.
+
+### Fewer clicks
+
+After "CSV" (and after a DualPlayer conversion) the panel links the open sequence/comp automatically when it is not linked yet and the CSV has a single stream, then syncs. An already linked target is never re-linked, and the offset starts at 0 for a newly linked target. The first sync of a target still stops at the confirm drawer, so the usual flow is "CSV" → pick the file → "この内容で同期".
 
 ### Exporting marker frames
 
@@ -98,7 +114,7 @@ The image is the **source video frame** at its original resolution, decoded in t
 
 Each moderator exports their own CSV from the extension. With the sync file loaded, click "統合" next to "CSV" and select one or more of those files (the dialog opens in the sync file's folder). They are merged into the sync file by `id` with the same rules as everywhere else: the row with the later `updated_at` wins and `deleted=true` tombstones are kept. Rows from other streams are kept too and appear in the stream selector. The sync file is re-read right before writing and written with the usual `.bak` protection; nothing is written when no row is new or newer.
 
-After a successful merge the selected files are moved to a `merged/` folder next to the sync file (a timestamp is appended if the name is taken). A file with unreadable rows (or that cannot be parsed) is skipped and left in place, and the log lists its line numbers. Selecting the sync file itself is ignored. Merging the same file again is harmless because IDs deduplicate. Markers pick up the merged rows on the next "同期".
+After a successful merge the selected files are moved to a `merged/` folder next to the sync file (a timestamp is appended if the name is taken). A file with unreadable rows (or that cannot be parsed) is skipped and left in place, and the log lists its line numbers. Selecting the sync file itself is ignored. Merging the same file again is harmless because IDs deduplicate. If the open sequence is already linked, the panel syncs right away; otherwise markers pick up the merged rows on the next "同期". A CSV that has its own `.yts-sync.json` (another target's sync file) is merged but not moved, and a file with warnings (for example an Excel-mangled `stream_id`) is skipped.
 
 ### Marker list
 

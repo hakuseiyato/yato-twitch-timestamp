@@ -156,6 +156,10 @@ const TSLib = (function () {
     if (parsedWarnings.length > 0 || warnings.length > 0 || Number(source.repaired) > 0) {
       reasons.push('警告あり');
     }
+    // Syncs right after an import (CSV pick / DualPlayer conversion / merge) run without asking only for additions.
+    if (source.afterImport && preview.some(function (row) { return row.kind !== 'add-app' && row.kind !== 'add-csv'; })) {
+      reasons.push('取り込み後の変更');
+    }
     return reasons;
   }
 
@@ -522,7 +526,12 @@ const TSLib = (function () {
   // ---- foreign CSV formats ----------------------------------------------------
 
   function headerFields(text) {
-    const firstLine = String(text || '').replace(/^﻿/, '').split(/\r?\n/)[0] || '';
+    // First non-empty row, using the same filter as parseCsv (Excel can insert a blank or comma-only first line).
+    const source = String(text || '').replace(/^﻿/, '');
+    const firstRow = parseCsvRows(source).find(function (row) {
+      return row.fields.some(function (field) { return field !== ''; });
+    });
+    const firstLine = firstRow ? source.split(/\r?\n/)[firstRow.line - 1] || '' : '';
     const delimiter = firstLine.indexOf('\t') >= 0 && firstLine.indexOf(',') < 0 ? '\t' : ',';
     const rows = parseCsvRows(firstLine, delimiter);
     return { delimiter: delimiter, headers: rows.length ? rows[0].fields.map(function (h) { return h.trim(); }) : [] };
@@ -552,13 +561,17 @@ const TSLib = (function () {
     const stamp = opts.updatedAt || new Date().toISOString();
     const records = [];
     const skippedRows = [];
+    const perMs = new Map();
     for (const rowInfo of rows) {
       const raw = col(rowInfo.fields, 'Seconds').trim();
       const seconds = Number(raw);
       if (raw === '' || !Number.isFinite(seconds) || seconds < 0) { skippedRows.push(rowInfo.line); continue; }
       const ms = Math.round(seconds * 1000);
+      // Several stamps at the same millisecond (e.g. notes added while paused) get distinct, row-order-stable ids.
+      const n = perMs.get(ms) || 0;
+      perMs.set(ms, n + 1);
       records.push(normalizeRecord({
-        id: 'y' + fnv1aHex(String(opts.streamId) + '|' + ms).slice(1),
+        id: 'y' + fnv1aHex(String(opts.streamId) + '|' + ms + (n ? '|' + n : '')).slice(1),
         offset_sec: ms / 1000,
         by: 'dualplayer',
         memo: col(rowInfo.fields, 'Note'),
@@ -623,35 +636,73 @@ const TSLib = (function () {
     const tc = formatTimecodeFrames(t, fps).replace(/:/g, '-');
     const safe = String(name || '')
       .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_')
-      .trim()
-      .slice(0, 60)
-      .replace(/[\s.]+$/, '');
-    return tc + (safe ? '_' + safe : '') + '.png';
+      .trim();
+    // Cut by characters, not UTF-16 units, so an emoji is never split in half.
+    const short = Array.from(safe).slice(0, 60).join('').replace(/[\s.]+$/, '');
+    return tc + (short ? '_' + short : '') + '.png';
   }
 
   // Merges other CSVs (e.g. moderators' exports) into the sync file's records.
   // Same rules as mergeRecords; the counts compare the result with the original sync records.
   function mergeIntoSync(syncRecords, incomingLists) {
-    const lists = [syncRecords || []].concat(incomingLists || []);
+    // Import rules (merging other CSVs / converted DualPlayer exports into the sync file):
+    // - a tombstone in the sync file is never changed or revived by an import;
+    // - DualPlayer rows carry the export file's time, not a per-row edit time, so they only replace a row
+    //   that is still exactly as imported (by dualplayer, never edited: updated_at === created_at);
+    // - the same id under a different stream is re-keyed to a stable new id instead of overwriting;
+    // - otherwise the later updated_at wins, and identical content keeps the original row.
+    const result = new Map();
     const original = new Map();
-    mergeRecords(syncRecords || []).forEach(function (record) { original.set(record.id, record); });
-    // A newer row whose content is identical (only created_at/updated_at differ, e.g. a re-exported file)
-    // keeps the original row, so it is neither counted nor re-stamped as an update.
-    const contentOf = function (record) {
-      const value = Object.assign({}, record, { created_at: '', updated_at: '' });
-      return recordSignature(value);
-    };
-    const records = mergeRecords.apply(null, lists).map(function (record) {
-      const prior = original.get(record.id);
-      return prior && contentOf(prior) === contentOf(record) ? prior : record;
+    mergeRecords(syncRecords || []).forEach(function (record) {
+      original.set(record.id, record);
+      result.set(record.id, record);
     });
+    const contentOf = function (record) {
+      return recordSignature(Object.assign({}, record, { created_at: '', updated_at: '' }));
+    };
+    let keptEdited = 0;
+    let rekeyed = 0;
+    (incomingLists || []).forEach(function (list) {
+      mergeRecords(list || []).forEach(function (incoming) {
+        let row = incoming;
+        let prior = result.get(row.id);
+        if (prior && prior.stream_id !== row.stream_id) {
+          let salt = 0;
+          let id;
+          do {
+            id = 'y' + fnv1aHex(String(row.stream_id) + '|' + incoming.id + '|' + salt).slice(1);
+            salt += 1;
+          } while (result.has(id) && result.get(id).stream_id !== row.stream_id);
+          row = Object.assign({}, row, { id: id, rekeyed: true });
+          prior = result.get(id);
+        }
+        const take = function () {
+          if (row.rekeyed) { rekeyed += 1; row = Object.assign({}, row); delete row.rekeyed; }
+          result.set(row.id, row);
+        };
+        if (!prior) { take(); return; }
+        if (contentOf(prior) === contentOf(row)) return;
+        // Only a tombstone that was already in the sync file is protected; between incoming files later-wins decides,
+        // so the result does not depend on the order the files were selected in.
+        if (original.has(row.id) && original.get(row.id).deleted) { keptEdited += 1; return; }
+        if (row.by === 'dualplayer' && !(prior.by === 'dualplayer' && prior.updated_at === prior.created_at)) {
+          keptEdited += 1;
+          return;
+        }
+        const priorTime = Date.parse(prior.updated_at);
+        const rowTime = Date.parse(row.updated_at);
+        if (Number.isFinite(rowTime) && (!Number.isFinite(priorTime) || rowTime > priorTime)) take();
+      });
+    });
+    const records = mergeRecords(Array.from(result.values()));
     let added = 0;
     let updated = 0;
     records.forEach(function (record) {
       if (!original.has(record.id)) added += 1;
       else if (recordSignature(original.get(record.id)) !== recordSignature(record)) updated += 1;
     });
-    return { records: records, added: added, updated: updated, unchanged: records.length - added - updated };
+    return { records: records, added: added, updated: updated, unchanged: records.length - added - updated,
+      keptEdited: keptEdited, rekeyed: rekeyed };
   }
 
   function mergeFresh(input) {

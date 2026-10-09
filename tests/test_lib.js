@@ -767,6 +767,90 @@ if (process.argv.includes('--write-sample')) {
   assert.strictEqual(TSLib.parseCsv(TSLib.toCsv(first.records)).records.length, 2);
 }
 
+// Review of 57e0395 — import safety.
+{
+  const streamId = TSLib.dualPlayerStreamId('D:/Footage/_261007');
+  const dp = (rows) => 'Timecode,Seconds,Note,Has Screenshot,Thumbnail (Base64)\n' +
+    rows.map(r => '00:00:00:00,' + r[0] + ',"' + r[1] + '",No,""').join('\n') + '\n';
+  const t1 = '2026-10-08T00:00:00.000Z', t2 = '2026-10-09T00:00:00.000Z', t3 = '2026-10-10T00:00:00.000Z';
+  const conv = (text, at) => TSLib.convertDualPlayer(text, { streamId: streamId, channel: '_261007', updatedAt: at });
+
+  // H1: a re-export never reverts edits made in the app (move / rename / delete) after the first import.
+  const first = conv(dp([[10, 'a'], [20, 'b'], [30, 'c']]), t1).records;
+  const id = (sec) => first.find(r => r.offset_sec === sec).id;
+  const afterSync = first.map(r => {
+    if (r.offset_sec === 10) return Object.assign({}, r, { offset_sec: 12, updated_at: t2 });            // moved in the app
+    if (r.offset_sec === 20) return Object.assign({}, r, { memo: 'b renamed', updated_at: t2 });         // renamed in the app
+    if (r.offset_sec === 30) return Object.assign({}, r, { deleted: true, updated_at: t2 });             // deleted in the app
+    return r;
+  });
+  const reexport = conv(dp([[10, 'a'], [20, 'b'], [30, 'c'], [40, 'd']]), t3).records;
+  const m = TSLib.mergeIntoSync(afterSync, [reexport]);
+  const byId = new Map(m.records.map(r => [r.id, r]));
+  assert.deepStrictEqual([m.added, m.updated, m.keptEdited], [1, 0, 3]);
+  assert.strictEqual(byId.get(id(10)).offset_sec, 12);
+  assert.strictEqual(byId.get(id(20)).memo, 'b renamed');
+  assert.strictEqual(byId.get(id(30)).deleted, true);                                               // tombstone not revived
+  // ...but an untouched imported row still takes a note edited in DualPlayer.
+  const m2 = TSLib.mergeIntoSync(first, [conv(dp([[10, 'a2'], [20, 'b'], [30, 'c']]), t3).records]);
+  assert.deepStrictEqual([m2.added, m2.updated, m2.keptEdited], [0, 1, 0]);
+
+  // M1: two stamps at the same millisecond keep both notes, with stable ids.
+  const same = conv(dp([[5, 'first'], [5, 'second']]), t1).records;
+  assert.strictEqual(same.length, 2);
+  assert.deepStrictEqual(same.map(r => r.memo).sort(), ['first', 'second']);
+  assert.deepStrictEqual(conv(dp([[5, 'first'], [5, 'second']]), t1).records.map(r => r.id), same.map(r => r.id));
+
+  // M4: the same id under another stream is re-keyed (stably), never overwriting the other stream's row.
+  const mine = [Object.assign({}, first[0], { stream_id: 'local-aaaa0000', channel: 'seq' })];
+  const theirs = [Object.assign({}, first[0], { memo: 'other stream', updated_at: t3 })];
+  const r1 = TSLib.mergeIntoSync(mine, [theirs]);
+  assert.strictEqual(r1.rekeyed, 1);
+  assert.strictEqual(r1.records.length, 2);
+  assert.strictEqual(r1.records.find(r => r.id === first[0].id).stream_id, 'local-aaaa0000');
+  const r2 = TSLib.mergeIntoSync(r1.records, [theirs]);                                               // merging again adds nothing
+  assert.deepStrictEqual([r2.added, r2.records.length], [0, 2]);
+
+  // Moderator rows (per-row times) still follow later-wins, but never revive a tombstone.
+  const mod = Object.assign({}, first[1], { by: 'mod', created_at: t1, updated_at: t1 });
+  const modEdited = Object.assign({}, mod, { memo: 'mod fix', updated_at: t3 });
+  assert.strictEqual(TSLib.mergeIntoSync([mod], [[modEdited]]).records[0].memo, 'mod fix');
+  const tomb = Object.assign({}, mod, { deleted: true, updated_at: t2 });
+  assert.strictEqual(TSLib.mergeIntoSync([tomb], [[modEdited]]).records[0].deleted, true);
+
+  // Re-review: the result does not depend on the order of the selected files; a re-key is counted once.
+  const base = Object.assign({}, mod, { deleted: false });
+  const tombIn = Object.assign({}, base, { deleted: true, updated_at: t2 });
+  const liveIn = Object.assign({}, base, { memo: 'newer', updated_at: t3 });
+  const orderA = TSLib.mergeIntoSync([base], [[tombIn], [liveIn]]).records[0];
+  const orderB = TSLib.mergeIntoSync([base], [[liveIn], [tombIn]]).records[0];
+  assert.deepStrictEqual([orderA.memo, orderA.deleted], ['newer', false]);
+  assert.deepStrictEqual([orderB.memo, orderB.deleted], ['newer', false]);
+  const otherStream = Object.assign({}, base, { stream_id: 'other-stream' });
+  const k1 = TSLib.mergeIntoSync([base], [[otherStream]]);
+  const k2 = TSLib.mergeIntoSync(k1.records, [[otherStream]]);
+  assert.deepStrictEqual([k1.rekeyed, k2.rekeyed, k2.added], [1, 0, 0]);
+  assert.ok(!JSON.stringify(k1.records).includes('rekeyed'));
+
+  // L1: a sync CSV with a blank or comma-only first line is still detected as sync.
+  assert.strictEqual(TSLib.detectCsvFormat('"",""\r\n' + TSLib.toCsv(first).replace(/^﻿/, '')).format, 'sync');
+  const syncText = TSLib.toCsv(first).replace(/^\uFEFF/, '');
+  assert.strictEqual(TSLib.detectCsvFormat('\r\n' + syncText).format, 'sync');
+  assert.strictEqual(TSLib.detectCsvFormat(',,,,\r\n' + syncText).format, 'sync');
+
+  // L3: names are cut by characters, so an emoji is never split.
+  const emojiName = TSLib.frameFileName(1, 30, 'x'.repeat(59) + '😀');
+  assert.ok(emojiName.endsWith('x😀.png'));
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emojiName));
+
+  // afterImport: additions alone run without asking; any other change stops at the drawer.
+  const plan = (kinds) => ({ preview: kinds.map(k => ({ kind: k })), appOps: [] });
+  const entry = { lastSyncAt: t2 };
+  assert.deepStrictEqual(TSLib.syncConfirmReasons({ plan: plan(['add-app', 'add-csv']), entry: entry, afterImport: true }), []);
+  assert.deepStrictEqual(TSLib.syncConfirmReasons({ plan: plan(['add-app', 'memo']), entry: entry, afterImport: true }), ['取り込み後の変更']);
+  assert.deepStrictEqual(TSLib.syncConfirmReasons({ plan: plan(['memo']), entry: entry }), []);          // normal syncs unchanged
+}
+
 // recordsFromMarkers: creating a new sync CSV from the active sequence's markers.
 {
   const streamId = TSLib.localStreamId('D:\\proj\\a.prproj', 'seq-1');

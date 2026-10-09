@@ -52,6 +52,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let activeEntry = null;
   let activeKey = '';
   let userOffsetSec = 0;
+  let offsetCsvPath = '';
   let busy = false;
   let previewState = null;
   let choices = {};
@@ -453,8 +454,11 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       userOffsetSec = Number(activeEntry.userOffset) || 0;
     } else {
       populateStreams(elements.stream.value);
-      if (activeKey !== previousActiveKey) userOffsetSec = 0;
+      // An unlinked target starts at offset 0 when the target or the CSV changed, so a previous CSV's
+      // offset is never carried into an automatic link.
+      if (activeKey !== previousActiveKey || csvFilePath !== offsetCsvPath) userOffsetSec = 0;
     }
+    offsetCsvPath = csvFilePath;
     updateLinkState(false);
     updateOffsetDisplay();
     updateControls();
@@ -535,6 +539,14 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
+  // "（追加 a 件・更新 u 件・編集済みのため取り込まなかった k 件・…）" for a mergeIntoSync result.
+  function importCounts(merged) {
+    const parts = ['追加 ' + merged.added + ' 件', '更新 ' + merged.updated + ' 件'];
+    if (merged.keptEdited) parts.push('編集済みのため取り込まなかった ' + merged.keptEdited + ' 件');
+    if (merged.rekeyed) parts.push('別の配信と重なった ID を振り直した ' + merged.rekeyed + ' 件');
+    return '（' + parts.join('・') + '）';
+  }
+
   // Reads a CSV in any supported format. Old DualPlayer exports are converted to sync rows
   // (stream = the folder the CSV sits in, updated_at = the file's modification time).
   function readAnyCsv(path) {
@@ -570,7 +582,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       }
       const merged = TSLib.mergeIntoSync(existing.records, [converted.records]);
       if (merged.added || merged.updated) atomicWrite(target, TSLib.toCsv(merged.records));
-      message = basename(target) + ' に取り込みました（追加 ' + merged.added + ' 件・更新 ' + merged.updated + ' 件）';
+      message = basename(target) + ' に取り込みました' + importCounts(merged);
     } else {
       atomicWrite(target, TSLib.toCsv(converted.records));
       message = basename(target) + ' を作成しました（' + converted.records.length + ' 件）';
@@ -585,25 +597,32 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   // Returns false when it did nothing (no target, several streams, ...), so the caller can show its own message.
   async function autoLinkAndSync(prefix) {
     if (!csvFilePath || groups.length !== 1 || !selectedGroup()) return false;
-    let info;
-    try { info = await callHost('ytsTargetInfo()', true); } catch (error) { return false; }
-    if (!info || !info.hasTarget) return false;
-    const sidecarPath = getSidecarPath(csvFilePath);
-    let autoLinked = false;
-    if (!readSidecar(sidecarPath).targets[targetKey(info)]) {
-      await linkTarget();
-      if (!readSidecar(sidecarPath).targets[targetKey(info)]) return true; // linking failed; its error is already shown
-      autoLinked = true;
+    try {
+      let info;
+      try { info = await callHost('ytsTargetInfo()', true); } catch (error) { return false; }
+      if (!info || !info.hasTarget) return false;
+      const sidecarPath = getSidecarPath(csvFilePath);
+      let autoLinked = false;
+      if (!readSidecar(sidecarPath).targets[targetKey(info)]) {
+        await linkTarget();
+        if (!readSidecar(sidecarPath).targets[targetKey(info)]) return true; // linking failed; its error is already shown
+        autoLinked = true;
+      }
+      await syncNow(true);
+      const notes = [];
+      if (prefix) notes.push(prefix);
+      notes.push(elements.status.textContent);
+      if (autoLinked) {
+        const offsetNote = userOffsetSec ? '（オフセット ' + userOffsetSec + ' 秒）' : '';
+        notes.push(info.name + ' に自動で紐付けました' + offsetNote +
+          (elements.previewDrawer.hidden ? '' : '。別のシーケンスに紐付ける場合は、そのシーケンスを開いて再紐付けしてください'));
+      }
+      setStatus(notes.join(' / '), elements.status.classList.contains('error') ? 'error' : 'ok');
+      return true;
+    } catch (error) {
+      setStatus((prefix ? prefix + ' / ' : '') + messageOf(error), 'error');
+      return true;
     }
-    await syncNow();
-    const notes = [];
-    if (prefix) notes.push(prefix);
-    notes.push(elements.status.textContent);
-    if (autoLinked && !elements.previewDrawer.hidden) {
-      notes.push(info.name + ' に自動で紐付けました。別のシーケンスに紐付ける場合は、そのシーケンスを開いて再紐付けしてください');
-    }
-    setStatus(notes.join(' / '), elements.status.classList.contains('error') ? 'error' : 'ok');
-    return true;
   }
 
   async function pickCsv() {
@@ -661,8 +680,11 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
       const streamId = TSLib.localStreamId(info.projectPath, info.targetId);
       const now = new Date().toISOString();
+      // Memos come from ytsListMarkers (exactly what sync compares later); details only add the recorder.
+      const listed = await callHost('ytsListMarkers()', true);
+      const byIndex = new Map(markers.map(function (m) { return [m.index, m.by]; }));
       const built = TSLib.recordsFromMarkers({
-        appMarkers: markers.map(function (m) { return { index: m.index, id: m.id, t: m.t, memo: m.name, by: m.by }; }),
+        appMarkers: listed.map(function (m) { return { index: m.index, id: m.id, t: m.t, memo: m.memo, by: byIndex.get(m.index) || '' }; }),
         streamId: streamId,
         channel: info.name || '',
         by: hostApp === 'PPRO' ? 'premiere' : 'ae',
@@ -879,7 +901,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
           messages.push(basename(path) + ': 読めない行 ' + parsed.skippedRows.join(', ') + ' 行目のため統合しませんでした');
           return;
         }
-        accepted.push({ path: path, records: parsed.records });
+        if (parsed.warnings && parsed.warnings.length) {
+          messages.push(basename(path) + ': ' + parsed.warnings.join('、') + '（統合しませんでした）');
+          return;
+        }
+        // A CSV with its own sidecar is another target's sync file: merge it, but leave it where it is.
+        accepted.push({ path: path, records: parsed.records, keepInPlace: pathExists(getSidecarPath(path)) });
       } catch (error) {
         messages.push(basename(path) + ': ' + messageOf(error) + '（統合しませんでした）');
       }
@@ -906,7 +933,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
 
     // Move sources only after the sync file was written (or nothing needed writing).
-    const notMoved = accepted.filter(function (item) { return !moveToMergedFolder(item.path); });
+    accepted.forEach(function (item) {
+      if (item.keepInPlace) messages.push(basename(item.path) + ' はほかで同期ファイルとして使われているため移動しませんでした');
+    });
+    const notMoved = accepted.filter(function (item) { return !item.keepInPlace && !moveToMergedFolder(item.path); });
     notMoved.forEach(function (item) { messages.push('統合済みですが移動できませんでした: ' + basename(item.path)); });
     setBusy(false);
 
@@ -914,9 +944,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     await loadCsvPath(csvFilePath, false);
     refreshMarkers();
     const summary = merged.added || merged.updated
-      ? accepted.length + ' ファイルを統合しました（追加 ' + merged.added + ' 件・更新 ' + merged.updated + ' 件）'
-      : accepted.length + ' ファイルを確認しました。新しいタイムスタンプはありませんでした';
-    const moved = accepted.length - notMoved.length;
+      ? accepted.length + ' ファイルを統合しました' + importCounts(merged)
+      : accepted.length + ' ファイルを確認しました。新しいタイムスタンプはありませんでした' +
+        (merged.keptEdited ? importCounts(merged) : '');
+    const moved = accepted.filter(function (item) { return !item.keepInPlace; }).length - notMoved.length;
     const mergeMessage = [summary + (moved ? '。merged へ移動しました' : '')].concat(messages).join(' / ');
     setStatus(mergeMessage, notMoved.length || messages.some(function (m) { return /統合しませんでした/.test(m); }) ? '' : 'ok');
     // Already linked: go on to sync (merging never links a target by itself).
@@ -1781,7 +1812,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       await refreshMarkers();
   }
 
-  async function syncNow() {
+  // afterImport: called right after a CSV pick / conversion / merge; then anything but additions asks first.
+  async function syncNow(afterImport) {
     // Drop any earlier preview so a failed recompute never leaves a stale drawer executable.
     invalidatePreview();
     setBusy(true);
@@ -1793,7 +1825,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
           plan: state.plan,
           entry: state.entry,
           parsedWarnings: state.parsedWarnings,
-          repaired: state.repaired
+          repaired: state.repaired,
+          afterImport: afterImport === true
         });
         if (reasons.length > 0) {
           openDrawer();
@@ -1879,7 +1912,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     });
     elements.linkTarget.addEventListener('click', linkTarget);
     elements.addMarkerBtn.addEventListener('click', addMarker);
-    elements.syncBtn.addEventListener('click', syncNow);
+    elements.syncBtn.addEventListener('click', function () { syncNow(false); });
     elements.executeBtn.addEventListener('click', executeFromDrawer);
     elements.closePreview.addEventListener('click', invalidatePreview);
     elements.confirmDelete.addEventListener('change', updateControls);

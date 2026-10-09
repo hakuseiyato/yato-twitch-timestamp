@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="8.0" ExtensionBundleId="com.yato.twitchtimestamp" ExtensionBundleVersion="0.1.0"
+<ExtensionManifest Version="8.0" ExtensionBundleId="com.yato.twitchtimestamp" ExtensionBundleVersion="0.2.0"
 		ExtensionBundleName="Yato Twitch Timestamp" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<ExtensionList><Extension Id="com.yato.twitchtimestamp.panel" Version="0.1.0" /></ExtensionList>
+	<ExtensionList><Extension Id="com.yato.twitchtimestamp.panel" Version="0.2.0" /></ExtensionList>
 	<ExecutionEnvironment>
 		<HostList><Host Name="PPRO" Version="22.0" /><Host Name="AEFT" Version="22.0" /></HostList>
 		<LocaleList><Locale Code="All" /></LocaleList>
