@@ -10,7 +10,9 @@
 <body>
   <main>
     <div class="toolbar-row">
+      <button id="newCsv" class="small secondary" type="button" title="今のシーケンス（コンポ）のマーカーから同期 CSV を新規作成" aria-label="同期 CSV を新規作成">新規</button>
       <button id="pickCsv" class="small secondary" type="button" title="同期 CSV を選択" aria-label="同期 CSV を選択">CSV</button>
+      <button id="mergeCsv" class="small secondary" type="button" title="ほかの CSV を同期ファイルに統合（複数選択可）" aria-label="CSV を統合">統合</button>
       <div class="offset-control">
         <button id="offsetBtn" class="small secondary icon-label-button" type="button" title="オフセット" aria-label="オフセット" aria-haspopup="dialog" aria-expanded="false">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.5V8l2.5 1.5"></path></svg>
@@ -30,6 +32,9 @@
         </div>
       </div>
       <select id="stream" hidden disabled><option value="">CSV を選択してください</option></select>
+      <button id="exportFramesBtn" class="small secondary icon-button" type="button" title="全マーカーを画像で書き出す" aria-label="全マーカーを画像で書き出す" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"></path></svg>
+      </button>
       <button id="refreshBtn" class="small secondary icon-button" type="button" title="更新" aria-label="更新">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5V1.5L11.6 3A6 6 0 1 0 14 8"></path><path d="M13 1.5H9.5"></path></svg>
       </button>

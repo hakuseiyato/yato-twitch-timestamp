@@ -74,6 +74,32 @@ Changes made in the CSV, Premiere Pro, or After Effects are included in the diff
 
 Editing the CSV in Excel is supported, but keep the `id` column. A row without a valid ID gets a deterministic legacy ID based on its content, so changing its stream, offset, author, memo, or creation time before the first sync can change that ID. The first panel sync writes these IDs into the CSV. If duplicate IDs occur in one file, the first row keeps its ID and later rows receive new IDs. If an edited `timecode` (`h:mm:ss`, `hh:mm:ss`, or `mm:ss`) differs from `offset_sec`, the timecode wins and is converted to integer seconds. ID and timecode repairs force the panel to rewrite the CSV on the next sync. Deleting a CSV row, or setting `deleted=true`, deletes its marker on the next sync. Deleting a marker in an Adobe app writes a `deleted=true` tombstone to the CSV so other linked targets also delete it.
 
+### Creating a sync file from Premiere Pro / After Effects
+
+A sync file does not have to come from the Chrome extension. Open the sequence (or comp) whose markers you want to start from and click "新規". Choose where to save the CSV (default name: the sequence name); an existing file is never overwritten. The panel writes one row per marker, gives untagged markers an ID tag, links the sequence, and records the current markers as already synchronized, so the next "同期" only handles real changes. Rows get `stream_id = local-<hash of project path and sequence ID>`, `channel` = sequence name, an empty `started_at`, and `by` from the marker comment (or `premiere` / `ae`). At least one marker is required ("＋追加" can place one). Moderators' CSVs can be merged into the new file later with "統合"; their rows keep their own Twitch stream and show up as a separate stream.
+
+### DualPlayer CSVs
+
+Current DualPlayer builds export the sync format directly. Older builds wrote `Timecode, Seconds, Note, Has Screenshot, Thumbnail (Base64)` (comma- or tab-separated); the panel recognizes that format:
+
+- Picking such a file with "CSV" asks whether to convert it. The original is never modified; the converted rows go to `<name>_sync.csv` next to it (merged if that file already exists, so re-exports can be imported again). Then link a sequence and sync as usual.
+- Selecting it in "統合" converts and merges it into the current sync file.
+- Conversion: `offset_sec` = `Seconds`, `memo` = `Note`, `by` = `dualplayer`, `channel` = the CSV's folder name, `stream_id` = `dual-<hash of the folder path>`, `created_at`/`updated_at` = the file's modification time. IDs are derived from the stream and the time, so the same stamp keeps its ID across re-exports and an edited note merges as an update. Thumbnails are not imported.
+
+Any other CSV is rejected with a message naming the file; use "新規" to start a sync file from a sequence's markers.
+
+### Exporting marker frames
+
+The image button left of "↻" writes a PNG for every marker in the list; the image button on each row writes that marker only. Files go to a `frames/` folder next to the sync file and are named `HH-MM-SS-FF_<marker name>.png` (characters not allowed in Windows file names become `_`, the name part is capped at 60 characters, and an empty name leaves only the timecode). Exporting the same marker again overwrites its file; when two markers in one batch would get the same name, `_2`, `_3`, ... are appended. A sync CSV must be loaded.
+
+The image is the **source video frame** at its original resolution, decoded in the panel the same way as thumbnails, so titles, effects and other layers are not included. Browser seeking can be off by one frame. Markers whose source cannot be resolved (shown as "プレビューなし") are skipped and counted in the log.
+
+### Merging other CSVs
+
+Each moderator exports their own CSV from the extension. With the sync file loaded, click "統合" next to "CSV" and select one or more of those files (the dialog opens in the sync file's folder). They are merged into the sync file by `id` with the same rules as everywhere else: the row with the later `updated_at` wins and `deleted=true` tombstones are kept. Rows from other streams are kept too and appear in the stream selector. The sync file is re-read right before writing and written with the usual `.bak` protection; nothing is written when no row is new or newer.
+
+After a successful merge the selected files are moved to a `merged/` folder next to the sync file (a timestamp is appended if the name is taken). A file with unreadable rows (or that cannot be parsed) is skipped and left in place, and the log lists its line numbers. Selecting the sync file itself is ignored. Merging the same file again is harmless because IDs deduplicate. Markers pick up the merged rows on the next "同期".
+
 ### Marker list
 
 The always-visible marker list shows a thumbnail, timecode, name, and comment / recorder. Click a timecode to move the playhead. Click a name to edit it; Enter confirms, Shift+Enter inserts a line break, Esc cancels, and Enter does not confirm during IME composition. Premiere Pro comments can also be edited while preserving the trailing `by: X [yts:id]` metadata. "＋追加" creates a marker at the playhead, moving it forward one frame if that time is occupied. A marker is deleted by pressing its trash button twice, with the second press at least 300 ms and no more than three seconds after the first. Edits are applied to the app immediately and reach the CSV on the next synchronization. If the active target has changed, editing is rejected with "対象が切り替わりました。↻ で更新してください".

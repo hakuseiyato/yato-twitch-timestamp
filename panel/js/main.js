@@ -7,7 +7,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
 (function () {
   const elements = {
+    newCsv: document.getElementById('newCsv'),
     pickCsv: document.getElementById('pickCsv'),
+    mergeCsv: document.getElementById('mergeCsv'),
+    exportFramesBtn: document.getElementById('exportFramesBtn'),
     stream: document.getElementById('stream'),
     offsetBtn: document.getElementById('offsetBtn'),
     offsetLabel: document.getElementById('offsetLabel'),
@@ -39,7 +42,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     markerList: document.getElementById('markerList')
   };
   const storageKey = 'yts.csvPath.' + hostApp;
-  const allControls = [elements.pickCsv, elements.stream, elements.offsetBtn, elements.linkTarget,
+  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.exportFramesBtn, elements.stream, elements.offsetBtn, elements.linkTarget,
     elements.refreshBtn, elements.addUntagged, elements.addMarkerBtn, elements.syncBtn, elements.executeBtn];
   const offsetControls = [elements.offsetInput, elements.offsetMinusSec, elements.offsetPlusSec,
     elements.offsetMinusFrame, elements.offsetPlusFrame, elements.offsetReset];
@@ -61,6 +64,13 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   const thumbCache = new Map();
   const thumbFailed = new Set();
   const thumbnailVideo = document.createElement('video');
+  // Separate decoder for full-resolution frame export so it never disturbs the thumbnail queue.
+  const frameVideo = document.createElement('video');
+  frameVideo.muted = true;
+  frameVideo.preload = 'auto';
+  const frameCanvas = document.createElement('canvas');
+  let frameVideoPath = '';
+  let lastMarkerDetails = null;
   const thumbnailCanvas = document.createElement('canvas');
   let currentVideoPath = '';
   let thumbnailQueue = [];
@@ -387,6 +397,11 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     const group = selectedGroup();
     const linked = !!activeEntry;
     elements.pickCsv.disabled = busy;
+    elements.newCsv.disabled = busy; // the active target is re-read when clicked
+    elements.mergeCsv.disabled = busy || !csvFilePath;
+    const exportableCount = lastMarkerDetails ? lastMarkerDetails.markers.filter(function (m) { return m.media; }).length : 0;
+    elements.exportFramesBtn.disabled = busy || !csvFilePath || !exportableCount;
+    elements.exportFramesBtn.title = csvFilePath ? '全マーカーを画像で書き出す' : '同期 CSV を読み込むと書き出せます';
     elements.refreshBtn.disabled = busy;
     elements.stream.disabled = busy || !groups.length || linked;
     elements.stream.hidden = !(groups.length >= 2 && !activeEntry);
@@ -468,7 +483,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     invalidatePreview();
     setBusy(true);
     try {
-      const parsed = TSLib.parseCsv(readText(path));
+      const text = readText(path);
+      if (TSLib.detectCsvFormat(text).format !== 'sync') throw notSyncFormatError(path);
+      const parsed = TSLib.parseCsv(text);
       groups = TSLib.groupByStream(parsed.records);
       csvById = new Map();
       parsed.records.forEach(function (record) {
@@ -504,10 +521,406 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
-  function pickCsv() {
+  function notSyncFormatError(path) {
+    return new Error(basename(path) + ' は同期ファイルの形式ではありません（offset_sec の列がありません）。シーケンスのマーカーから作るには「新規」を使ってください');
+  }
+
+  function fileMtimeIso(path) {
+    try {
+      const result = window.cep.fs.stat(path);
+      const time = result && result.err === 0 && result.data ? new Date(result.data.mtime).getTime() : NaN;
+      return Number.isFinite(time) ? new Date(time).toISOString() : new Date().toISOString();
+    } catch (error) {
+      return new Date().toISOString();
+    }
+  }
+
+  // Reads a CSV in any supported format. Old DualPlayer exports are converted to sync rows
+  // (stream = the folder the CSV sits in, updated_at = the file's modification time).
+  function readAnyCsv(path) {
+    const text = readText(path);
+    const detected = TSLib.detectCsvFormat(text);
+    if (detected.format === 'sync') return { format: 'sync', parsed: TSLib.parseCsv(text) };
+    if (detected.format === 'dualplayer') {
+      const folder = dirname(path);
+      return {
+        format: 'dualplayer',
+        parsed: TSLib.convertDualPlayer(text, {
+          delimiter: detected.delimiter,
+          streamId: TSLib.dualPlayerStreamId(folder),
+          channel: basename(folder),
+          updatedAt: fileMtimeIso(path)
+        })
+      };
+    }
+    throw notSyncFormatError(path);
+  }
+
+  // DualPlayer CSV picked as the sync file: convert to "<name>_sync.csv" next to it (merging if it already exists).
+  async function adoptDualPlayerCsv(path, converted) {
+    const target = path.replace(/(\.[^.\\/]*)?$/, '_sync.csv');
+    if (converted.skippedRows.length) {
+      throw new Error(basename(path) + ': 読めない行 ' + converted.skippedRows.join(', ') + ' 行目があるため変換しませんでした');
+    }
+    let message;
+    if (pathExists(target)) {
+      const existing = TSLib.parseCsv(readText(target));
+      if (existing.skippedRows && existing.skippedRows.length) {
+        throw new Error(basename(target) + ' に読めない行があります: ' + existing.skippedRows.join(', ') + ' 行目');
+      }
+      const merged = TSLib.mergeIntoSync(existing.records, [converted.records]);
+      if (merged.added || merged.updated) atomicWrite(target, TSLib.toCsv(merged.records));
+      message = basename(target) + ' に取り込みました（追加 ' + merged.added + ' 件・更新 ' + merged.updated + ' 件）';
+    } else {
+      atomicWrite(target, TSLib.toCsv(converted.records));
+      message = basename(target) + ' を作成しました（' + converted.records.length + ' 件）';
+    }
+    await loadCsvPath(target, true);
+    refreshMarkers();
+    return { path: target, message: 'DualPlayer の CSV を変換しました: ' + message };
+  }
+
+  // Right after the user loads a CSV: link the open sequence/comp if it is not linked yet (never re-links,
+  // so sync history is kept), then go straight to sync. The first sync still stops at the confirm drawer.
+  // Returns false when it did nothing (no target, several streams, ...), so the caller can show its own message.
+  async function autoLinkAndSync(prefix) {
+    if (!csvFilePath || groups.length !== 1 || !selectedGroup()) return false;
+    let info;
+    try { info = await callHost('ytsTargetInfo()', true); } catch (error) { return false; }
+    if (!info || !info.hasTarget) return false;
+    const sidecarPath = getSidecarPath(csvFilePath);
+    let autoLinked = false;
+    if (!readSidecar(sidecarPath).targets[targetKey(info)]) {
+      await linkTarget();
+      if (!readSidecar(sidecarPath).targets[targetKey(info)]) return true; // linking failed; its error is already shown
+      autoLinked = true;
+    }
+    await syncNow();
+    const notes = [];
+    if (prefix) notes.push(prefix);
+    notes.push(elements.status.textContent);
+    if (autoLinked && !elements.previewDrawer.hidden) {
+      notes.push(info.name + ' に自動で紐付けました。別のシーケンスに紐付ける場合は、そのシーケンスを開いて再紐付けしてください');
+    }
+    setStatus(notes.join(' / '), elements.status.classList.contains('error') ? 'error' : 'ok');
+    return true;
+  }
+
+  async function pickCsv() {
     const result = window.cep.fs.showOpenDialogEx(false, false, '同期 CSV を選択', '', ['csv']);
     if (!result || result.err !== 0 || !result.data || !result.data[0]) return;
-    loadCsvPath(result.data[0], true).then(refreshMarkers);
+    const path = result.data[0];
+    let read;
+    try {
+      read = readAnyCsv(path);
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+      return;
+    }
+    // The original DualPlayer file is never modified, so it is converted without asking.
+    let loadedPath = path;
+    let prefix = '';
+    if (read.format === 'dualplayer') {
+      try {
+        const adopted = await adoptDualPlayerCsv(path, read.parsed);
+        loadedPath = adopted.path;
+        prefix = adopted.message;
+      } catch (error) {
+        setStatus(messageOf(error), 'error');
+        return;
+      }
+    } else {
+      await loadCsvPath(path, true);
+      refreshMarkers();
+    }
+    // loadCsvPath keeps the previous file when loading fails; only continue with the file just picked.
+    if (!samePath(csvFilePath, loadedPath)) return;
+    if (!(await autoLinkAndSync(prefix)) && prefix) setStatus(prefix, 'ok');
+  }
+
+  // ---- create a new sync CSV from the active sequence/comp -------------------
+
+  // Writes a CSV from the current markers, tags untagged markers, and links the target as already synced,
+  // so the next "同期" only handles real differences.
+  async function createCsvFromTarget() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const info = await callHost('ytsTargetInfo()', true);
+      if (!info || !info.hasTarget) throw new Error('シーケンス（コンポ）を開いてください');
+      const details = await callHost('ytsMarkerDetails()', true);
+      const markers = Array.isArray(details.markers) ? details.markers : [];
+      if (!markers.length) throw new Error('マーカーを 1 つ以上打ってから作成してください（＋追加でも打てます）');
+
+      const defaultName = String(info.name || 'markers').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_') + '.csv';
+      const dialog = window.cep.fs.showSaveDialogEx('同期 CSV を新規作成', csvFilePath ? dirname(csvFilePath) : '', ['csv'], defaultName);
+      if (!dialog || dialog.err !== 0 || !dialog.data) return;
+      let path = String(dialog.data);
+      if (!/\.csv$/i.test(path)) path += '.csv';
+      if (pathExists(path)) throw new Error('同じ名前のファイルがあります。別の名前にしてください');
+
+      const streamId = TSLib.localStreamId(info.projectPath, info.targetId);
+      const now = new Date().toISOString();
+      const built = TSLib.recordsFromMarkers({
+        appMarkers: markers.map(function (m) { return { index: m.index, id: m.id, t: m.t, memo: m.name, by: m.by }; }),
+        streamId: streamId,
+        channel: info.name || '',
+        by: hostApp === 'PPRO' ? 'premiere' : 'ae',
+        now: now,
+        fps: info.fps
+      });
+      let failedIds = [];
+      if (built.tagOps.length) {
+        const applied = await callHost('ytsApply(' + hostLiteral(built.tagOps) + ')', true);
+        failedIds = Array.isArray(applied.failed) ? applied.failed : [];
+      }
+      const failed = new Set(failedIds);
+      const records = built.records.filter(function (record) { return !failed.has(record.id); });
+      if (!records.length) throw new Error('マーカーに ID を付けられませんでした');
+      atomicWrite(path, TSLib.toCsv(records));
+
+      // Base = what actually landed in the app, read back after tagging (same as after a sync).
+      const relisted = await callHost('ytsListMarkers()', true);
+      const sidecar = emptySidecar();
+      sidecar.targets[targetKey(info)] = {
+        host: hostApp,
+        projectPath: info.projectPath || '',
+        targetId: String(info.targetId || ''),
+        name: info.name || '',
+        stream_id: streamId,
+        userOffset: 0,
+        lastSyncAt: now,
+        base: TSLib.baseFromMarkers({ records: records, streamId: streamId, appMarkers: relisted, userOffset: 0 })
+      };
+      atomicWrite(getSidecarPath(path), JSON.stringify(sidecar, null, 2));
+
+      setBusy(false);
+      userOffsetSec = 0;
+      await loadCsvPath(path, true);
+      refreshMarkers();
+      setStatus(basename(path) + ' を作成しました（マーカー ' + records.length + ' 件）。このシーケンスと紐付けました' +
+        (failed.size ? '（ID を付けられなかった ' + failed.size + ' 件は除外）' : ''), failed.size ? '' : 'ok');
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+    } finally {
+      if (busy) setBusy(false);
+    }
+  }
+
+  // ---- export marker frames as PNG (source frame, full resolution) ---------
+
+  // Decodes the source video at full resolution and returns a PNG data URL.
+  // ponytail: browser seeking can land ±1 frame off; add an ffmpeg path if frame-exact output is needed.
+  function captureFullFrame(media, fps) {
+    return new Promise(function (resolve, reject) {
+      let settled = false;
+      const listeners = [];
+      const timer = setTimeout(function () { finish(new Error('動画の読み込みがタイムアウトしました')); }, 20000);
+      function finish(error, dataUrl) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        listeners.forEach(function (item) { frameVideo.removeEventListener(item[0], item[1]); });
+        if (error) { frameVideoPath = ''; reject(error); } else resolve(dataUrl);
+      }
+      function once(eventName, next) {
+        const onEvent = function () { next(); };
+        const onError = function () { finish(new Error('動画を読み込めませんでした')); };
+        frameVideo.addEventListener(eventName, onEvent, { once: true });
+        frameVideo.addEventListener('error', onError, { once: true });
+        listeners.push([eventName, onEvent], ['error', onError]);
+      }
+      function draw() {
+        try {
+          if (!frameVideo.videoWidth) throw new Error('動画サイズを取得できませんでした');
+          frameCanvas.width = frameVideo.videoWidth;
+          frameCanvas.height = frameVideo.videoHeight;
+          frameCanvas.getContext('2d').drawImage(frameVideo, 0, 0);
+          finish(null, frameCanvas.toDataURL('image/png'));
+        } catch (error) { finish(error); }
+      }
+      function seek() {
+        // Land inside the frame rather than on its boundary, where the previous frame can be shown.
+        const nudge = Math.min(0.25 / (fps > 0 ? fps : 30), 0.004);
+        const duration = Number.isFinite(frameVideo.duration) ? frameVideo.duration : Infinity;
+        once('seeked', draw);
+        frameVideo.currentTime = Math.max(0, Math.min(media.t + nudge, duration - 0.05));
+      }
+      const url = 'file:///' + encodeURI(String(media.path).replace(/\\/g, '/').replace(/^\/+/, ''))
+        .replace(/#/g, '%23').replace(/\?/g, '%3F');
+      if (frameVideoPath !== media.path) {
+        frameVideoPath = media.path;
+        once('loadedmetadata', seek);
+        frameVideo.src = url;
+        frameVideo.load();
+      } else {
+        seek();
+      }
+    });
+  }
+
+  function framesFolder() {
+    const folder = dirname(csvFilePath) + '/frames';
+    if (!pathExists(folder)) {
+      const made = window.cep.fs.makedir(folder);
+      if (!made || made.err !== 0) throw new Error('frames フォルダを作成できませんでした（エラー ' + (made ? made.err : '不明') + '）');
+    }
+    return folder;
+  }
+
+  async function writeFrame(marker, fps, folder, fileName) {
+    const dataUrl = await captureFullFrame(marker.media, fps);
+    const written = window.cep.fs.writeFile(folder + '/' + fileName, dataUrl.slice(dataUrl.indexOf(',') + 1), window.cep.encoding.Base64);
+    if (!written || written.err !== 0) throw new Error('画像を保存できませんでした（エラー ' + (written ? written.err : '不明') + '）');
+  }
+
+  async function exportOneFrame(marker, fps) {
+    if (busy) return;
+    if (!csvFilePath) { setStatus('同期 CSV を読み込むと書き出せます', 'error'); return; }
+    if (!marker.media) { setStatus('素材がないため書き出せません', 'error'); return; }
+    setBusy(true);
+    try {
+      const fileName = TSLib.frameFileName(marker.t, fps, marker.name);
+      await writeFrame(marker, fps, framesFolder(), fileName);
+      setStatus('frames/' + fileName + ' を書き出しました', 'ok');
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportAllFrames() {
+    if (busy || !csvFilePath || !lastMarkerDetails) return;
+    const fps = lastMarkerDetails.fps;
+    const markers = lastMarkerDetails.markers.slice();
+    const exportable = markers.filter(function (m) { return m.media; });
+    const noMedia = markers.length - exportable.length;
+    setBusy(true);
+    let written = 0;
+    const failures = [];
+    try {
+      const folder = framesFolder();
+      const used = new Set();
+      for (let i = 0; i < exportable.length; i += 1) {
+        const marker = exportable[i];
+        setStatus('画像を書き出し中 ' + (i + 1) + '/' + exportable.length, '');
+        // Same name twice in one batch gets _2, _3; across batches the same name is overwritten.
+        let fileName = TSLib.frameFileName(marker.t, fps, marker.name);
+        for (let n = 2; used.has(fileName.toLowerCase()); n += 1) {
+          fileName = TSLib.frameFileName(marker.t, fps, marker.name).replace(/\.png$/, '_' + n + '.png');
+        }
+        used.add(fileName.toLowerCase());
+        try {
+          await writeFrame(marker, fps, folder, fileName);
+          written += 1;
+        } catch (error) {
+          failures.push(TSLib.formatTimecodeFrames(marker.t, fps) + ': ' + messageOf(error));
+        }
+      }
+      const summary = written + ' 枚を frames に書き出しました（素材なし ' + noMedia + ' 件・失敗 ' + failures.length + ' 件）';
+      setStatus([summary].concat(failures).join(' / '), failures.length ? 'error' : 'ok');
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---- merge other CSVs (e.g. moderators' exports) into the sync file -------
+
+  function dirname(path) {
+    const value = String(path || '');
+    const index = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'));
+    return index >= 0 ? value.slice(0, index) : '';
+  }
+
+  function samePath(a, b) {
+    const normalize = function (value) { return String(value || '').replace(/\\/g, '/').toLowerCase(); };
+    return normalize(a) === normalize(b);
+  }
+
+  function stampForFileName() {
+    const pad = function (value) { return String(value).padStart(2, '0'); };
+    const d = new Date();
+    return String(d.getFullYear()) + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+
+  // Moves a merged source into <sync dir>/merged/, adding a timestamp when the name is taken.
+  function moveToMergedFolder(path) {
+    const folder = dirname(csvFilePath) + '/merged';
+    if (!pathExists(folder)) {
+      const made = window.cep.fs.makedir(folder);
+      if (!made || made.err !== 0) return false;
+    }
+    const name = basename(path);
+    let target = folder + '/' + name;
+    if (pathExists(target)) target = folder + '/' + name.replace(/(\.csv)?$/i, '_' + stampForFileName() + '$1');
+    const moved = window.cep.fs.rename(path, target);
+    return !!moved && moved.err === 0;
+  }
+
+  function pickMergeCsv() {
+    if (busy || !csvFilePath) return;
+    const result = window.cep.fs.showOpenDialogEx(true, false, '統合する CSV を選択（複数選択可）', dirname(csvFilePath), ['csv']);
+    if (!result || result.err !== 0 || !result.data || !result.data.length) return;
+    mergeCsvFiles(result.data);
+  }
+
+  async function mergeCsvFiles(paths) {
+    const messages = [];
+    const sources = paths.filter(function (path) { return !samePath(path, csvFilePath); });
+    if (sources.length < paths.length) messages.push('同期ファイル自身は除外しました');
+    const accepted = [];
+    sources.forEach(function (path) {
+      try {
+        const parsed = readAnyCsv(path).parsed;
+        if (parsed.skippedRows && parsed.skippedRows.length) {
+          messages.push(basename(path) + ': 読めない行 ' + parsed.skippedRows.join(', ') + ' 行目のため統合しませんでした');
+          return;
+        }
+        accepted.push({ path: path, records: parsed.records });
+      } catch (error) {
+        messages.push(basename(path) + ': ' + messageOf(error) + '（統合しませんでした）');
+      }
+    });
+    if (!accepted.length) {
+      setStatus(messages.concat('統合できる CSV がありませんでした').join(' / '), 'error');
+      return;
+    }
+
+    setBusy(true);
+    let merged;
+    try {
+      // Re-read the sync file right before writing so edits made since it was loaded are kept.
+      const current = TSLib.parseCsv(readText(csvFilePath));
+      if (current.skippedRows && current.skippedRows.length) {
+        throw new Error('同期ファイルに読めない行があります: ' + current.skippedRows.join(', ') + ' 行目');
+      }
+      merged = TSLib.mergeIntoSync(current.records, accepted.map(function (item) { return item.records; }));
+      if (merged.added || merged.updated) atomicWrite(csvFilePath, TSLib.toCsv(merged.records));
+    } catch (error) {
+      setBusy(false);
+      setStatus(messages.concat(messageOf(error)).join(' / '), 'error');
+      return;
+    }
+
+    // Move sources only after the sync file was written (or nothing needed writing).
+    const notMoved = accepted.filter(function (item) { return !moveToMergedFolder(item.path); });
+    notMoved.forEach(function (item) { messages.push('統合済みですが移動できませんでした: ' + basename(item.path)); });
+    setBusy(false);
+
+    invalidatePreview();
+    await loadCsvPath(csvFilePath, false);
+    refreshMarkers();
+    const summary = merged.added || merged.updated
+      ? accepted.length + ' ファイルを統合しました（追加 ' + merged.added + ' 件・更新 ' + merged.updated + ' 件）'
+      : accepted.length + ' ファイルを確認しました。新しいタイムスタンプはありませんでした';
+    const moved = accepted.length - notMoved.length;
+    const mergeMessage = [summary + (moved ? '。merged へ移動しました' : '')].concat(messages).join(' / ');
+    setStatus(mergeMessage, notMoved.length || messages.some(function (m) { return /統合しませんでした/.test(m); }) ? '' : 'ok');
+    // Already linked: go on to sync (merging never links a target by itself).
+    if (activeEntry && (merged.added || merged.updated)) await autoLinkAndSync(mergeMessage);
   }
 
   function numericOffset() {
@@ -555,6 +968,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   function showMarkerEmpty(message) {
+    lastMarkerDetails = null;
+    updateControls();
     thumbGeneration += 1;
     thumbnailQueue = [];
     if (activeCaptureAbort) activeCaptureAbort();
@@ -939,6 +1354,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       showMarkerEmpty('マーカーがありません');
       return;
     }
+    lastMarkerDetails = { fps: details.fps, markers: markers };
+    updateControls();
     markerObserver = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (!entry.isIntersecting) return;
@@ -961,6 +1378,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const comment = document.createElement('button');
       const markerBy = document.createElement('span');
       const deleteButton = document.createElement('button');
+      const frameButton = document.createElement('button');
       const timecode = TSLib.formatTimecodeFrames(marker.t, details.fps);
       const record = marker.id ? csvById.get(marker.id) : null;
       const by = marker.by || (record ? record.by : '') || '';
@@ -998,6 +1416,13 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       deleteButton.setAttribute('aria-label', '削除');
       deleteButton.title = '削除';
       deleteButton.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.6 8h5.8l.6-8M6.5 6.5v4M9.5 6.5v4"></path></svg>';
+      frameButton.type = 'button';
+      frameButton.className = 'icon-button marker-frame';
+      frameButton.setAttribute('aria-label', '画像を書き出す');
+      frameButton.title = marker.media ? '画像を書き出す' : '素材がないため書き出せません';
+      frameButton.disabled = !marker.media;
+      frameButton.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"></path></svg>';
+      frameButton.addEventListener('click', function () { exportOneFrame(marker, details.fps); });
       tc.addEventListener('click', function () {
         lastSeekKey = seekKey;
         const rows = elements.markerList.querySelectorAll('.marker-row');
@@ -1023,6 +1448,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       if (hostApp === 'PPRO' || by) body.appendChild(line2);
       row.appendChild(thumb);
       row.appendChild(body);
+      row.appendChild(frameButton);
       row.appendChild(deleteButton);
       elements.markerList.appendChild(row);
       if (!marker.media) applyThumbnail(row, null, null, '', false);
@@ -1443,7 +1869,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   function bindEvents() {
+    elements.newCsv.addEventListener('click', createCsvFromTarget);
     elements.pickCsv.addEventListener('click', pickCsv);
+    elements.mergeCsv.addEventListener('click', pickMergeCsv);
+    elements.exportFramesBtn.addEventListener('click', exportAllFrames);
     elements.refreshBtn.addEventListener('click', async function () {
       await refreshTarget(true);
       await refreshMarkers();

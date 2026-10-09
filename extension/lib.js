@@ -192,7 +192,8 @@ const TSLib = (function () {
     return '\uFEFF' + lines.join('\r\n') + '\r\n';
   }
 
-  function parseCsvRows(text) {
+  function parseCsvRows(text, delimiter) {
+    const sep = delimiter || ',';
     const rows = [];
     let row = [];
     let field = '';
@@ -219,7 +220,7 @@ const TSLib = (function () {
         }
       } else if (ch === '"' && field === '') {
         quoted = true;
-      } else if (ch === ',') {
+      } else if (ch === sep) {
         row.push(field);
         field = '';
       } else if (ch === '\r' || ch === '\n') {
@@ -516,6 +517,141 @@ const TSLib = (function () {
     return [value.id, value.offset_sec, value.by, value.memo, value.native, value.channel,
       value.stream_id, value.started_at, value.created_at, value.updated_at, value.deleted,
       value.clock_skew_ms].join('\u0001');
+  }
+
+  // ---- foreign CSV formats ----------------------------------------------------
+
+  function headerFields(text) {
+    const firstLine = String(text || '').replace(/^﻿/, '').split(/\r?\n/)[0] || '';
+    const delimiter = firstLine.indexOf('\t') >= 0 && firstLine.indexOf(',') < 0 ? '\t' : ',';
+    const rows = parseCsvRows(firstLine, delimiter);
+    return { delimiter: delimiter, headers: rows.length ? rows[0].fields.map(function (h) { return h.trim(); }) : [] };
+  }
+
+  // 'sync' (this tool's format), 'dualplayer' (DualPlayer's Timecode/Seconds/Note export, comma or tab), or 'unknown'.
+  function detectCsvFormat(text) {
+    const info = headerFields(text);
+    if (info.headers.indexOf('offset_sec') >= 0) return { format: 'sync', delimiter: ',' };
+    if (['Timecode', 'Seconds', 'Note'].every(function (h) { return info.headers.indexOf(h) >= 0; })) {
+      return { format: 'dualplayer', delimiter: info.delimiter };
+    }
+    return { format: 'unknown', delimiter: info.delimiter };
+  }
+
+  // Converts an old DualPlayer export (Timecode, Seconds, Note, Has Screenshot, Thumbnail) into sync-file rows.
+  // The id is derived from stream + time, so re-exporting the same stamps yields the same ids (memo edits merge as updates).
+  function convertDualPlayer(text, options) {
+    const opts = options || {};
+    const delimiter = opts.delimiter || detectCsvFormat(text).delimiter;
+    const rows = parseCsvRows(String(text || '').replace(/^﻿/, ''), delimiter).filter(function (row) {
+      return row.fields.some(function (field) { return field !== ''; });
+    });
+    if (!rows.length) throw new Error('CSV にヘッダーがありません');
+    const headers = rows.shift().fields.map(function (h) { return h.trim(); });
+    const col = function (row, name) { const i = headers.indexOf(name); return i >= 0 && row[i] !== undefined ? row[i] : ''; };
+    const stamp = opts.updatedAt || new Date().toISOString();
+    const records = [];
+    const skippedRows = [];
+    for (const rowInfo of rows) {
+      const raw = col(rowInfo.fields, 'Seconds').trim();
+      const seconds = Number(raw);
+      if (raw === '' || !Number.isFinite(seconds) || seconds < 0) { skippedRows.push(rowInfo.line); continue; }
+      const ms = Math.round(seconds * 1000);
+      records.push(normalizeRecord({
+        id: 'y' + fnv1aHex(String(opts.streamId) + '|' + ms).slice(1),
+        offset_sec: ms / 1000,
+        by: 'dualplayer',
+        memo: col(rowInfo.fields, 'Note'),
+        native: false,
+        channel: opts.channel || '',
+        stream_id: opts.streamId,
+        started_at: '',
+        created_at: stamp,
+        updated_at: stamp,
+        deleted: false,
+        clock_skew_ms: 0
+      }));
+    }
+    return { records: mergeRecords(records), skipped: skippedRows.length, skippedRows: skippedRows };
+  }
+
+  function dualPlayerStreamId(folderPath) {
+    return 'dual-' + fnv1aHex(String(folderPath || '').replace(/\\/g, '/').toLowerCase());
+  }
+
+  // Stable stream id for a sync file created from an Adobe sequence/comp (no Twitch stream behind it).
+  function localStreamId(projectPath, targetId) {
+    return 'local-' + fnv1aHex(String(projectPath || '') + '|' + String(targetId || ''));
+  }
+
+  // Builds the rows of a brand-new sync CSV from the markers of the active sequence/comp.
+  // Untagged markers (and later duplicates of an id) get a new id plus a 'tag' op for ytsApply.
+  function recordsFromMarkers(input) {
+    const source = input || {};
+    const now = source.now || new Date().toISOString();
+    const records = [];
+    const tagOps = [];
+    const seen = new Set();
+    for (const marker of source.appMarkers || []) {
+      if (typeof marker.t !== 'number' || !Number.isFinite(marker.t) || marker.t < 0) continue;
+      let id = isValidId(marker.id) && !seen.has(marker.id) ? marker.id : '';
+      if (!id) {
+        do { id = newId(); } while (seen.has(id));
+        tagOps.push({ op: 'tag', id: id, t: marker.t, appT: marker.t, index: marker.index });
+      }
+      seen.add(id);
+      records.push(normalizeRecord({
+        id: id,
+        offset_sec: marker.t,
+        by: marker.by || source.by || '',
+        memo: appMemo(marker.memo, null, marker.t, null, 0),
+        native: false,
+        channel: source.channel || '',
+        stream_id: source.streamId,
+        started_at: '',
+        created_at: now,
+        updated_at: now,
+        deleted: false,
+        clock_skew_ms: 0
+      }));
+    }
+    return { records: mergeRecords(records), tagOps: tagOps };
+  }
+
+  // File name for an exported marker frame: "HH-MM-SS-FF_<name>.png", safe on Windows.
+  function frameFileName(t, fps, name) {
+    const tc = formatTimecodeFrames(t, fps).replace(/:/g, '-');
+    const safe = String(name || '')
+      .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_')
+      .trim()
+      .slice(0, 60)
+      .replace(/[\s.]+$/, '');
+    return tc + (safe ? '_' + safe : '') + '.png';
+  }
+
+  // Merges other CSVs (e.g. moderators' exports) into the sync file's records.
+  // Same rules as mergeRecords; the counts compare the result with the original sync records.
+  function mergeIntoSync(syncRecords, incomingLists) {
+    const lists = [syncRecords || []].concat(incomingLists || []);
+    const original = new Map();
+    mergeRecords(syncRecords || []).forEach(function (record) { original.set(record.id, record); });
+    // A newer row whose content is identical (only created_at/updated_at differ, e.g. a re-exported file)
+    // keeps the original row, so it is neither counted nor re-stamped as an update.
+    const contentOf = function (record) {
+      const value = Object.assign({}, record, { created_at: '', updated_at: '' });
+      return recordSignature(value);
+    };
+    const records = mergeRecords.apply(null, lists).map(function (record) {
+      const prior = original.get(record.id);
+      return prior && contentOf(prior) === contentOf(record) ? prior : record;
+    });
+    let added = 0;
+    let updated = 0;
+    records.forEach(function (record) {
+      if (!original.has(record.id)) added += 1;
+      else if (recordSignature(original.get(record.id)) !== recordSignature(record)) updated += 1;
+    });
+    return { records: records, added: added, updated: updated, unchanged: records.length - added - updated };
   }
 
   function mergeFresh(input) {
@@ -853,7 +989,14 @@ const TSLib = (function () {
     finalizeRecords: finalizeRecords,
     applyNudges: applyNudges,
     recordSignature: recordSignature,
-    mergeFresh: mergeFresh
+    mergeFresh: mergeFresh,
+    mergeIntoSync: mergeIntoSync,
+    frameFileName: frameFileName,
+    localStreamId: localStreamId,
+    recordsFromMarkers: recordsFromMarkers,
+    detectCsvFormat: detectCsvFormat,
+    convertDualPlayer: convertDualPlayer,
+    dualPlayerStreamId: dualPlayerStreamId
   };
 }());
 

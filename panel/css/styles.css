@@ -104,6 +104,8 @@ button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-all
 .marker-comment { flex: 1; }
 .marker-by { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); }
 .marker-delete { flex: none; width: 24px; height: 24px; padding: 3px; color: var(--secondary); }
+.marker-frame { flex: none; width: 24px; height: 24px; padding: 3px; color: var(--secondary); }
+.marker-frame:hover:not(:disabled) { color: var(--link); }
 .marker-delete:hover:not(:disabled) { color: var(--error); }
 .marker-delete.confirm { width: auto; padding: 2px 6px; border-color: var(--error); background: var(--error); color: #fff; }
 

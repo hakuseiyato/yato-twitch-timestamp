@@ -735,6 +735,120 @@ assert.strictEqual(result.appOps[2].t, 2);
 if (process.argv.includes('--write-sample')) {
   fs.writeFileSync(path.resolve(__dirname, '../samples/sample.csv'), csv, 'utf8');
 }
+// Old DualPlayer exports (Timecode, Seconds, Note, Has Screenshot, Thumbnail) are detected and converted.
+{
+  const dpCsv = 'Timecode,Seconds,Note,Has Screenshot,Thumbnail (Base64)\n' +
+    '01:24:48:06,5088.219,"ゲイバーの話",No,""\n' +
+    '01:38:15:14,5895.489,"狙った, ""相手""\n二行目",Yes,"data:image/jpeg;base64,/9j/4AAQ=="\n' +
+    'xx,abc,"bad",No,""\n';
+  const dpTsv = 'Timecode\tSeconds\tNote\tHas Screenshot\tThumbnail (Base64)\n01:24:48:06\t5088.219\t"ゲイバーの話"\tNo\t""\n';
+  assert.deepStrictEqual(TSLib.detectCsvFormat(dpCsv), { format: 'dualplayer', delimiter: ',' });
+  assert.deepStrictEqual(TSLib.detectCsvFormat(dpTsv), { format: 'dualplayer', delimiter: '\t' });
+  assert.strictEqual(TSLib.detectCsvFormat(TSLib.toCsv([])).format, 'sync');
+  assert.strictEqual(TSLib.detectCsvFormat('\uFEFFName,Description,In,Out\n').format, 'unknown');
+  const streamId = TSLib.dualPlayerStreamId('D:\\Footage\\_261007');
+  assert.strictEqual(streamId, TSLib.dualPlayerStreamId('d:/footage/_261007'));           // path form / case independent
+  const opts = { streamId: streamId, channel: '_261007', updatedAt: '2026-10-08T00:00:00.000Z' };
+  const first = TSLib.convertDualPlayer(dpCsv, opts);
+  assert.strictEqual(first.records.length, 2);
+  assert.deepStrictEqual(first.skippedRows, [5]); // physical line: the quoted memo above spans two lines
+  assert.strictEqual(first.records[0].offset_sec, 5088.219);
+  assert.strictEqual(first.records[1].memo, '狙った, "相手"\n二行目');
+  assert.ok(first.records.every(r => r.by === 'dualplayer' && r.stream_id === streamId && r.channel === '_261007' && TSLib.isValidId(r.id)));
+  assert.ok(!/base64/.test(TSLib.toCsv(first.records)));                                   // thumbnails are not carried over
+  // TSV gives the same ids for the same stamp.
+  assert.strictEqual(TSLib.convertDualPlayer(dpTsv, opts).records[0].id, first.records[0].id);
+  // Re-export with an edited note (newer file) merges as an update, not a duplicate.
+  const edited = TSLib.convertDualPlayer(dpCsv.replace('ゲイバーの話', 'ゲイバーの話（修正）'), Object.assign({}, opts, { updatedAt: '2026-10-09T00:00:00.000Z' }));
+  const merged = TSLib.mergeIntoSync(first.records, [edited.records]);
+  assert.deepStrictEqual([merged.added, merged.updated, merged.records.length], [0, 1, 2]);
+  assert.strictEqual(merged.records[0].memo, 'ゲイバーの話（修正）');
+  // Existing sync-format parsing is unaffected by the delimiter parameter.
+  assert.strictEqual(TSLib.parseCsv(TSLib.toCsv(first.records)).records.length, 2);
+}
+
+// recordsFromMarkers: creating a new sync CSV from the active sequence's markers.
+{
+  const streamId = TSLib.localStreamId('D:\\proj\\a.prproj', 'seq-1');
+  assert.strictEqual(streamId, TSLib.localStreamId('D:\\proj\\a.prproj', 'seq-1'));      // stable
+  assert.notStrictEqual(streamId, TSLib.localStreamId('D:\\proj\\a.prproj', 'seq-2'));   // per sequence
+  assert.ok(/^local-[0-9a-f]{8}$/.test(streamId));
+  const markers = [
+    { index: 0, id: null, t: 20, memo: 'Opening', by: 'editor' },          // untagged → new id + tag op
+    { index: 1, id: 'yaaaaaa1', t: 90, memo: '見どころ\n二行目', by: '' },   // tagged → keeps id
+    { index: 2, id: 'yaaaaaa1', t: 95, memo: 'copy', by: '' },              // duplicate tag → new id + tag op
+    { index: 3, id: null, t: 100, memo: '00:01:40', by: '' },               // timecode name → empty memo
+    { index: 4, id: null, t: NaN, memo: 'bad', by: '' }                      // unreadable time → skipped
+  ];
+  const out = TSLib.recordsFromMarkers({ appMarkers: markers, streamId: streamId, channel: 'seqA', by: 'premiere', now: '2026-10-10T00:00:00.000Z' });
+  assert.strictEqual(out.records.length, 4);
+  assert.strictEqual(out.tagOps.length, 3);
+  assert.deepStrictEqual(out.tagOps.map(op => op.index), [0, 2, 3]);
+  const at = t => out.records.find(r => r.offset_sec === t);
+  assert.strictEqual(at(90).id, 'yaaaaaa1');
+  assert.notStrictEqual(at(95).id, 'yaaaaaa1');
+  assert.ok(TSLib.isValidId(at(20).id) && at(20).id === out.tagOps[0].id);
+  assert.strictEqual(at(20).by, 'editor');
+  assert.strictEqual(at(90).by, 'premiere');
+  assert.strictEqual(at(100).memo, '');
+  assert.strictEqual(at(90).memo, '見どころ\n二行目');
+  assert.ok(out.records.every(r => r.stream_id === streamId && r.channel === 'seqA' && r.started_at === '' && r.native === false && !r.deleted));
+  // CSV round trip: no unreadable rows, no id repairs, same content.
+  const parsed = TSLib.parseCsv(TSLib.toCsv(out.records));
+  assert.strictEqual(parsed.skippedRows.length, 0);
+  assert.strictEqual(parsed.repaired, 0);
+  assert.deepStrictEqual(parsed.records.map(r => [r.id, r.offset_sec, r.memo, r.by]), out.records.map(r => [r.id, r.offset_sec, r.memo, r.by]));
+  // The new file loads as one stream group.
+  assert.strictEqual(TSLib.groupByStream(parsed.records).length, 1);
+}
+
+// frameFileName: exported marker frame names are Windows-safe and stable.
+assert.strictEqual(TSLib.frameFileName(20, 30, 'Opening'), '00-00-20-00_Opening.png');
+assert.strictEqual(TSLib.frameFileName(3661, 30, 'a/b:c*d?"e<f>g|h'), '01-01-01-00_a_b_c_d__e_f_g_h.png');
+assert.strictEqual(TSLib.frameFileName(100, 30, ''), '00-01-40-00.png');
+assert.strictEqual(TSLib.frameFileName(90, 30, '見どころ\n二行目'), '00-01-30-00_見どころ_二行目.png');
+assert.strictEqual(TSLib.frameFileName(1.5, 59.94, 'x'), '00-00-01-29_x.png');
+assert.strictEqual(TSLib.frameFileName(0, 30, '  trailing...  '), '00-00-00-00_trailing.png');
+assert.strictEqual(TSLib.frameFileName(5, 30, 'x'.repeat(80)), '00-00-05-00_' + 'x'.repeat(60) + '.png');
+
+// mergeIntoSync: merging moderators' CSVs into the sync file.
+{
+  const row = (id, offset, updatedAt, extra) => Object.assign({
+    id: id, offset_sec: offset, by: 'mod', memo: '', native: false, channel: 'alpha', stream_id: 's1',
+    started_at: '2026-01-02T03:04:05Z', created_at: '2026-01-02T03:05:00Z', updated_at: updatedAt, deleted: false, clock_skew_ms: 0
+  }, extra || {});
+  const sync = [row('yaaaaaa1', 10, '2026-01-02T03:05:00Z'), row('yaaaaaa2', 20, '2026-01-02T03:06:00Z', { memo: 'keep' })];
+  const modA = [
+    row('ybbbbbb1', 30, '2026-01-02T03:07:00Z'),                                 // new
+    row('yaaaaaa1', 11, '2026-01-02T04:00:00Z', { memo: 'newer' }),              // newer update wins
+    row('yaaaaaa2', 99, '2026-01-01T00:00:00Z', { memo: 'older' })               // older update ignored
+  ];
+  const modB = [
+    row('ycccccc1', 40, '2026-01-02T03:08:00Z', { stream_id: 's2', channel: 'beta' }), // other stream kept
+    row('ybbbbbb1', 30, '2026-01-02T05:00:00Z', { deleted: true })                       // tombstone carried
+  ];
+  const result = TSLib.mergeIntoSync(sync, [modA, modB]);
+  const byId = new Map(result.records.map(r => [r.id, r]));
+  assert.strictEqual(result.records.length, 4);
+  assert.strictEqual(result.added, 2);       // ybbbbbb1, ycccccc1
+  assert.strictEqual(result.updated, 1);     // yaaaaaa1
+  assert.strictEqual(result.unchanged, 1);   // yaaaaaa2
+  assert.strictEqual(byId.get('yaaaaaa1').memo, 'newer');
+  assert.strictEqual(byId.get('yaaaaaa1').offset_sec, 11);
+  assert.strictEqual(byId.get('yaaaaaa2').memo, 'keep');
+  assert.strictEqual(byId.get('ybbbbbb1').deleted, true);
+  assert.strictEqual(byId.get('ycccccc1').stream_id, 's2');
+  // Merging the same files again changes nothing.
+  const again = TSLib.mergeIntoSync(result.records, [modA, modB]);
+  assert.deepStrictEqual([again.added, again.updated, again.unchanged], [0, 0, 4]);
+  // Round trip through CSV keeps the merge idempotent (what the panel actually writes and re-reads).
+  const reparsed = TSLib.parseCsv(TSLib.toCsv(result.records)).records;
+  const third = TSLib.mergeIntoSync(reparsed, [modA, modB]);
+  assert.deepStrictEqual([third.added, third.updated], [0, 0]);
+  // Nothing incoming.
+  assert.deepStrictEqual(TSLib.mergeIntoSync(sync, []).added, 0);
+}
+
 // Floating widget position: round trip, and clamping when the window shrinks.
 {
   const fr = TSLib.posToFractions(800, 500, 100, 40, 1000, 600);
