@@ -493,11 +493,57 @@ function ytsSeek(t) {
     }
 }
 
-// Opens a folder in Explorer (Finder on macOS).
-function ytsOpenFolder(path) {
+// VBScript string literal built from character codes, so the generated script stays ASCII
+// (WSH reads .vbs files in the ANSI code page, which would garble Japanese paths).
+function ytsVbsString(text) {
+    var parts = [];
+    var i;
+    for (i = 0; i < text.length; i += 1) parts.push("ChrW(" + text.charCodeAt(i) + ")");
+    return parts.length ? parts.join(" & ") : "\"\"";
+}
+
+// Shows an exported file in Explorer in front of other windows, with the file selected.
+// An Explorer window already showing the folder is closed first: Windows reuses such a window without
+// bringing it forward. Falls back to plainly opening the folder when the script cannot run.
+function ytsRevealFile(filePath) {
+    var file;
+    var folder;
+    var script;
+    var lines;
     try {
-        var folder = new Folder(String(path));
-        if (!folder.exists) return "ERR|フォルダが見つかりません";
+        file = new File(String(filePath));
+        folder = file.parent;
+        if (!folder || !folder.exists) return "ERR|フォルダが見つかりません";
+        lines = [
+            "Option Explicit",
+            "Dim app, w, p, i, count, wins(), target, file",
+            "file = " + ytsVbsString(file.fsName),
+            "target = LCase(" + ytsVbsString(folder.fsName) + ")",
+            "Set app = CreateObject(\"Shell.Application\")",
+            "count = 0",
+            "ReDim wins(app.Windows.Count)",
+            "For Each w In app.Windows",
+            "  p = \"\"",
+            "  On Error Resume Next",
+            "  p = LCase(w.Document.Folder.Self.Path)",
+            "  On Error GoTo 0",
+            "  If p = target Then Set wins(count) = w : count = count + 1",
+            "Next",
+            "For i = 0 To count - 1",
+            "  On Error Resume Next",
+            "  wins(i).Quit",
+            "  On Error GoTo 0",
+            "Next",
+            "CreateObject(\"WScript.Shell\").Run \"explorer.exe /select,\" & Chr(34) & file & Chr(34), 1, False"
+        ];
+        script = new File(Folder.temp.fsName + "/yts_reveal.vbs");
+        script.encoding = "ASCII";
+        script.lineFeed = "Windows";
+        if (script.open("w")) {
+            script.write(lines.join("\n"));
+            script.close();
+            if (script.execute()) return "OK|";
+        }
         folder.execute();
         return "OK|";
     } catch (e) {

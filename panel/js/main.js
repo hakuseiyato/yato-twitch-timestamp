@@ -848,10 +848,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
-  // Shows the destination in Explorer after an export; a failure here never fails the export itself.
-  async function openFolder(folder) {
+  // Shows the exported file in Explorer (in front, selected); a failure here never fails the export itself.
+  async function revealFile(filePath) {
     try {
-      await callHost('ytsOpenFolder(' + hostLiteral(folder) + ')', false);
+      await callHost('ytsRevealFile(' + hostLiteral(filePath) + ')', false);
       return true;
     } catch (error) {
       return false;
@@ -865,7 +865,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const folder = framesFolder();
       const fileName = TSLib.frameFileName(marker.t, fps, marker.name);
       const fellBack = await writeFrame(marker, fps, folder, fileName);
-      const opened = await openFolder(folder);
+      const opened = await revealFile(folder + '/' + fileName);
       setStatus(folder + '/' + fileName + ' を書き出しました' +
         (fellBack ? '（合成の書き出しに失敗したため、素材のフレームで書き出しました）' : '') +
         (opened ? '' : '（フォルダは開けませんでした）'), fellBack ? '' : 'ok');
@@ -893,6 +893,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     setBusy(true);
     let written = 0;
     let fellBackCount = 0;
+    let lastWritten = '';
     const failures = [];
     try {
       ensureFolder(folder);
@@ -909,11 +910,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
         try {
           if (await writeFrame(marker, fps, folder, fileName)) fellBackCount += 1;
           written += 1;
+          lastWritten = folder + '/' + fileName;
         } catch (error) {
           failures.push(TSLib.formatTimecodeFrames(marker.t, fps) + ': ' + messageOf(error));
         }
       }
-      const opened = written > 0 ? await openFolder(folder) : true;
+      const opened = lastWritten ? await revealFile(lastWritten) : true;
       const summary = written + ' 枚を ' + folder + ' に書き出しました（失敗 ' + failures.length + ' 件' +
         (fellBackCount ? '・素材のフレームで代用 ' + fellBackCount + ' 件' : '') + '）' +
         (opened ? '' : '（フォルダは開けませんでした）');
