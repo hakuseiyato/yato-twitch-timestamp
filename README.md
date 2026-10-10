@@ -106,9 +106,11 @@ After "CSV" (and after a DualPlayer conversion) the panel links the open sequenc
 
 ### Exporting marker frames
 
-The image button left of "↻" writes a PNG for every marker in the list; the image button on each row writes that marker only. Files go to a `frames/` folder next to the sync file and are named `HH-MM-SS-FF_<marker name>.png` (characters not allowed in Windows file names become `_`, the name part is capped at 60 characters, and an empty name leaves only the timecode). Exporting the same marker again overwrites its file; when two markers in one batch would get the same name, `_2`, `_3`, ... are appended. A sync CSV must be loaded.
+The image button left of "↻" exports every marker in the list; it first asks for the destination folder (starting at the last folder used, else `frames/` next to the sync file) and remembers it per host. The image button on each row exports that marker to the remembered folder without asking (or to `frames/` next to the sync file if no folder was chosen yet).
 
-The image is the **source video frame** at its original resolution, decoded in the panel the same way as thumbnails, so titles, effects and other layers are not included. Browser seeking can be off by one frame. Markers whose source cannot be resolved (shown as "プレビューなし") are skipped and counted in the log.
+The image is the **rendered frame of the sequence / comp**, including titles, effects and every other layer, at the sequence's frame size. Premiere Pro uses the QE `exportFramePNG`, which renders asynchronously (a few seconds per frame); the panel waits until the file is complete. After Effects uses `comp.saveFrameToPng` (not yet verified live). The playhead is not moved. If the rendered export fails, the panel falls back to the source video frame (decoded in the panel at the source resolution, titles not included) and says so in the log.
+
+Files are named `HH-MM-SS-FF_<marker name>.png` (characters not allowed in Windows file names become `_`, the name part is capped at 60 characters, and an empty name leaves only the timecode). Exporting the same marker again overwrites its file; when two markers in one batch would get the same name, `_2`, `_3`, ... are appended.
 
 ### Merging other CSVs
 

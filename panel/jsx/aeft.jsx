@@ -417,6 +417,29 @@ function ytsSeek(t) {
     }
 }
 
+// Exports the comp's rendered frame (all layers) at p.t as PNG via saveFrameToPng (not yet verified live in AE;
+// the panel falls back to the source frame when this fails).
+function ytsExportFrame(p) {
+    try {
+        var comp = ytsActiveComp();
+        var sep = String.fromCharCode(92);
+        var target;
+        if (!comp) return "ERR|アクティブなコンポジションがありません";
+        p = p || {};
+        if (typeof p.targetId === "undefined" || String(p.targetId) !== String(comp.id)) {
+            return "ERR|対象が切り替わりました。↻ で更新してください";
+        }
+        if (!isFinite(Number(p.t)) || Number(p.t) < 0) return "ERR|時刻が不正です";
+        if (typeof comp.saveFrameToPng !== "function") return "ERR|この After Effects では合成結果を書き出せません";
+        target = new File(new Folder(String(p.dir)).fsName + sep + String(p.name) + ".png");
+        if (target.exists) target.remove();
+        comp.saveFrameToPng(Number(p.t), target);
+        return "OK|" + ytsJson({ path: target.fsName, width: comp.width, height: comp.height });
+    } catch (e) {
+        return "ERR|フレームを書き出せませんでした: " + e.toString();
+    }
+}
+
 function ytsApply(ops) {
     try {
         var comp = ytsActiveComp();

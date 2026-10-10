@@ -400,9 +400,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.pickCsv.disabled = busy;
     elements.newCsv.disabled = busy; // the active target is re-read when clicked
     elements.mergeCsv.disabled = busy || !csvFilePath;
-    const exportableCount = lastMarkerDetails ? lastMarkerDetails.markers.filter(function (m) { return m.media; }).length : 0;
-    elements.exportFramesBtn.disabled = busy || !csvFilePath || !exportableCount;
-    elements.exportFramesBtn.title = csvFilePath ? '全マーカーを画像で書き出す' : '同期 CSV を読み込むと書き出せます';
+    elements.exportFramesBtn.disabled = busy || !lastMarkerDetails || !lastMarkerDetails.markers.length;
+    elements.exportFramesBtn.title = '全マーカーを画像で書き出す（保存先を選択）';
     elements.refreshBtn.disabled = busy;
     elements.stream.disabled = busy || !groups.length || linked;
     elements.stream.hidden = !(groups.length >= 2 && !activeEntry);
@@ -781,30 +780,83 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     });
   }
 
-  function framesFolder() {
-    const folder = dirname(csvFilePath) + '/frames';
+  // ---- where frames go ----------------------------------------------------
+  const framesDirKey = 'yts.framesDir.' + hostApp;
+
+  function rememberedFramesDir() {
+    try { return localStorage.getItem(framesDirKey) || ''; } catch (error) { return ''; }
+  }
+
+  function ensureFolder(folder) {
     if (!pathExists(folder)) {
       const made = window.cep.fs.makedir(folder);
-      if (!made || made.err !== 0) throw new Error('frames フォルダを作成できませんでした（エラー ' + (made ? made.err : '不明') + '）');
+      if (!made || made.err !== 0) throw new Error('保存先フォルダを作成できませんでした（エラー ' + (made ? made.err : '不明') + '）');
     }
     return folder;
   }
 
-  async function writeFrame(marker, fps, folder, fileName) {
+  // The folder chosen last time, or frames/ next to the sync file.
+  function framesFolder() {
+    const folder = rememberedFramesDir() || (csvFilePath ? dirname(csvFilePath) + '/frames' : '');
+    if (!folder) throw new Error('保存先が決まっていません。全マーカーの書き出しボタンで保存先を選んでください');
+    return ensureFolder(folder);
+  }
+
+  // Waits until the file exists and its length is stable (the Premiere export is asynchronous).
+  // cep.fs.stat has no size field, so the length is measured by reading the file once it exists.
+  async function waitForFile(path, timeoutMs) {
+    let lastLength = -1;
+    for (let waited = 0; waited <= timeoutMs; waited += 500) {
+      const stat = window.cep.fs.stat(path);
+      let length = -1;
+      if (stat && stat.err === 0) {
+        const read = window.cep.fs.readFile(path, window.cep.encoding.Base64);
+        length = read && read.err === 0 && read.data ? read.data.length : -1;
+      }
+      if (length > 0 && length === lastLength) return true;
+      lastLength = length;
+      await new Promise(function (resolve) { setTimeout(resolve, 500); });
+    }
+    return false;
+  }
+
+  // Rendered frame of the sequence/comp (all layers), written by the host.
+  async function writeCompositeFrame(marker, folder, fileName) {
+    const targetId = activeInfo && activeInfo.targetId ? String(activeInfo.targetId) : '';
+    const result = await callHost('ytsExportFrame(' + hostLiteral({
+      t: marker.t, dir: folder, name: fileName.replace(/\.png$/i, ''), targetId: targetId
+    }) + ')', true);
+    if (!(await waitForFile(result.path, 30000))) throw new Error('書き出したファイルが見つかりません（タイムアウト）');
+  }
+
+  // Source video frame decoded in the panel (fallback when the rendered export fails).
+  async function writeSourceFrame(marker, fps, folder, fileName) {
     const dataUrl = await captureFullFrame(marker.media, fps);
     const written = window.cep.fs.writeFile(folder + '/' + fileName, dataUrl.slice(dataUrl.indexOf(',') + 1), window.cep.encoding.Base64);
     if (!written || written.err !== 0) throw new Error('画像を保存できませんでした（エラー ' + (written ? written.err : '不明') + '）');
   }
 
+  // Returns true when it had to fall back to the source frame.
+  async function writeFrame(marker, fps, folder, fileName) {
+    try {
+      await writeCompositeFrame(marker, folder, fileName);
+      return false;
+    } catch (compositeError) {
+      if (/対象が切り替わりました/.test(messageOf(compositeError)) || !marker.media) throw compositeError;
+      await writeSourceFrame(marker, fps, folder, fileName);
+      return true;
+    }
+  }
+
   async function exportOneFrame(marker, fps) {
     if (busy) return;
-    if (!csvFilePath) { setStatus('同期 CSV を読み込むと書き出せます', 'error'); return; }
-    if (!marker.media) { setStatus('素材がないため書き出せません', 'error'); return; }
     setBusy(true);
     try {
+      const folder = framesFolder();
       const fileName = TSLib.frameFileName(marker.t, fps, marker.name);
-      await writeFrame(marker, fps, framesFolder(), fileName);
-      setStatus('frames/' + fileName + ' を書き出しました', 'ok');
+      const fellBack = await writeFrame(marker, fps, folder, fileName);
+      setStatus(folder + '/' + fileName + ' を書き出しました' +
+        (fellBack ? '（合成の書き出しに失敗したため、素材のフレームで書き出しました）' : ''), fellBack ? '' : 'ok');
     } catch (error) {
       setStatus(messageOf(error), 'error');
     } finally {
@@ -813,20 +865,29 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   async function exportAllFrames() {
-    if (busy || !csvFilePath || !lastMarkerDetails) return;
+    if (busy || !lastMarkerDetails || !lastMarkerDetails.markers.length) return;
+    // Choose the destination (starts at the last folder, else frames/ next to the sync file) and remember it.
+    const initial = rememberedFramesDir() || (csvFilePath ? dirname(csvFilePath) + '/frames' : '');
+    if (initial && csvFilePath && initial === dirname(csvFilePath) + '/frames') {
+      try { ensureFolder(initial); } catch (error) {}
+    }
+    const picked = window.cep.fs.showOpenDialogEx(false, true, '画像の保存先を選択', initial, []);
+    if (!picked || picked.err !== 0 || !picked.data || !picked.data[0]) return;
+    const folder = String(picked.data[0]);
+    try { localStorage.setItem(framesDirKey, folder); } catch (error) {}
+
     const fps = lastMarkerDetails.fps;
     const markers = lastMarkerDetails.markers.slice();
-    const exportable = markers.filter(function (m) { return m.media; });
-    const noMedia = markers.length - exportable.length;
     setBusy(true);
     let written = 0;
+    let fellBackCount = 0;
     const failures = [];
     try {
-      const folder = framesFolder();
+      ensureFolder(folder);
       const used = new Set();
-      for (let i = 0; i < exportable.length; i += 1) {
-        const marker = exportable[i];
-        setStatus('画像を書き出し中 ' + (i + 1) + '/' + exportable.length, '');
+      for (let i = 0; i < markers.length; i += 1) {
+        const marker = markers[i];
+        setStatus('画像を書き出し中 ' + (i + 1) + '/' + markers.length, '');
         // Same name twice in one batch gets _2, _3; across batches the same name is overwritten.
         let fileName = TSLib.frameFileName(marker.t, fps, marker.name);
         for (let n = 2; used.has(fileName.toLowerCase()); n += 1) {
@@ -834,14 +895,15 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
         }
         used.add(fileName.toLowerCase());
         try {
-          await writeFrame(marker, fps, folder, fileName);
+          if (await writeFrame(marker, fps, folder, fileName)) fellBackCount += 1;
           written += 1;
         } catch (error) {
           failures.push(TSLib.formatTimecodeFrames(marker.t, fps) + ': ' + messageOf(error));
         }
       }
-      const summary = written + ' 枚を frames に書き出しました（素材なし ' + noMedia + ' 件・失敗 ' + failures.length + ' 件）';
-      setStatus([summary].concat(failures).join(' / '), failures.length ? 'error' : 'ok');
+      const summary = written + ' 枚を ' + folder + ' に書き出しました（失敗 ' + failures.length + ' 件' +
+        (fellBackCount ? '・素材のフレームで代用 ' + fellBackCount + ' 件' : '') + '）';
+      setStatus([summary].concat(failures).join(' / '), failures.length ? 'error' : (fellBackCount ? '' : 'ok'));
     } catch (error) {
       setStatus(messageOf(error), 'error');
     } finally {
@@ -1450,8 +1512,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       frameButton.type = 'button';
       frameButton.className = 'icon-button marker-frame';
       frameButton.setAttribute('aria-label', '画像を書き出す');
-      frameButton.title = marker.media ? '画像を書き出す' : '素材がないため書き出せません';
-      frameButton.disabled = !marker.media;
+      frameButton.title = '画像を書き出す（前回選んだ保存先へ）';
       frameButton.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"></path></svg>';
       frameButton.addEventListener('click', function () { exportOneFrame(marker, details.fps); });
       tc.addEventListener('click', function () {

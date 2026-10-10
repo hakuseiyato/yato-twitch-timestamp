@@ -493,6 +493,38 @@ function ytsSeek(t) {
     }
 }
 
+// Exports the sequence's rendered frame (all layers) at p.t as PNG. The QE export runs asynchronously and
+// appends ".png" itself, so the panel waits for the returned path to appear. The playhead is not moved.
+function ytsExportFrame(p) {
+    try {
+        var seq = app.project ? app.project.activeSequence : null;
+        var sep = String.fromCharCode(92);
+        var settings;
+        var time;
+        var tc;
+        var base;
+        var target;
+        if (!seq) return "ERR|アクティブなシーケンスがありません";
+        p = p || {};
+        if (typeof p.targetId === "undefined" || String(p.targetId) !== String(seq.sequenceID)) {
+            return "ERR|対象が切り替わりました。↻ で更新してください";
+        }
+        if (!isFinite(Number(p.t)) || Number(p.t) < 0) return "ERR|時刻が不正です";
+        app.enableQE();
+        settings = seq.getSettings();
+        time = new Time();
+        time.seconds = Number(p.t);
+        tc = time.getFormatted(settings.videoFrameRate, settings.videoDisplayFormat);
+        base = new Folder(String(p.dir)).fsName + sep + String(p.name);
+        target = new File(base + ".png");
+        if (target.exists) target.remove();
+        if (!qe.project.getActiveSequence().exportFramePNG(tc, base)) return "ERR|フレームを書き出せませんでした";
+        return "OK|" + ytsJson({ path: target.fsName, width: settings.videoFrameWidth, height: settings.videoFrameHeight });
+    } catch (e) {
+        return "ERR|フレームを書き出せませんでした: " + e.toString();
+    }
+}
+
 function ytsApply(ops) {
     try {
         var seq = app.project ? app.project.activeSequence : null;
