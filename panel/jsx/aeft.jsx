@@ -417,6 +417,18 @@ function ytsSeek(t) {
     }
 }
 
+// Opens a folder in Explorer (Finder on macOS).
+function ytsOpenFolder(path) {
+    try {
+        var folder = new Folder(String(path));
+        if (!folder.exists) return "ERR|フォルダが見つかりません";
+        folder.execute();
+        return "OK|";
+    } catch (e) {
+        return "ERR|フォルダを開けませんでした: " + e.toString();
+    }
+}
+
 // Exports the comp's rendered frame (all layers) at p.t as PNG via saveFrameToPng (not yet verified live in AE;
 // the panel falls back to the source frame when this fails).
 function ytsExportFrame(p) {

@@ -848,6 +848,16 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
+  // Shows the destination in Explorer after an export; a failure here never fails the export itself.
+  async function openFolder(folder) {
+    try {
+      await callHost('ytsOpenFolder(' + hostLiteral(folder) + ')', false);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async function exportOneFrame(marker, fps) {
     if (busy) return;
     setBusy(true);
@@ -855,8 +865,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const folder = framesFolder();
       const fileName = TSLib.frameFileName(marker.t, fps, marker.name);
       const fellBack = await writeFrame(marker, fps, folder, fileName);
+      const opened = await openFolder(folder);
       setStatus(folder + '/' + fileName + ' を書き出しました' +
-        (fellBack ? '（合成の書き出しに失敗したため、素材のフレームで書き出しました）' : ''), fellBack ? '' : 'ok');
+        (fellBack ? '（合成の書き出しに失敗したため、素材のフレームで書き出しました）' : '') +
+        (opened ? '' : '（フォルダは開けませんでした）'), fellBack ? '' : 'ok');
     } catch (error) {
       setStatus(messageOf(error), 'error');
     } finally {
@@ -901,8 +913,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
           failures.push(TSLib.formatTimecodeFrames(marker.t, fps) + ': ' + messageOf(error));
         }
       }
+      const opened = written > 0 ? await openFolder(folder) : true;
       const summary = written + ' 枚を ' + folder + ' に書き出しました（失敗 ' + failures.length + ' 件' +
-        (fellBackCount ? '・素材のフレームで代用 ' + fellBackCount + ' 件' : '') + '）';
+        (fellBackCount ? '・素材のフレームで代用 ' + fellBackCount + ' 件' : '') + '）' +
+        (opened ? '' : '（フォルダは開けませんでした）');
       setStatus([summary].concat(failures).join(' / '), failures.length ? 'error' : (fellBackCount ? '' : 'ok'));
     } catch (error) {
       setStatus(messageOf(error), 'error');

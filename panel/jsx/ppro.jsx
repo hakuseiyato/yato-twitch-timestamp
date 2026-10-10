@@ -493,6 +493,18 @@ function ytsSeek(t) {
     }
 }
 
+// Opens a folder in Explorer (Finder on macOS).
+function ytsOpenFolder(path) {
+    try {
+        var folder = new Folder(String(path));
+        if (!folder.exists) return "ERR|フォルダが見つかりません";
+        folder.execute();
+        return "OK|";
+    } catch (e) {
+        return "ERR|フォルダを開けませんでした: " + e.toString();
+    }
+}
+
 // Exports the sequence's rendered frame (all layers) at p.t as PNG. The QE export runs asynchronously and
 // appends ".png" itself, so the panel waits for the returned path to appear. The playhead is not moved.
 function ytsExportFrame(p) {
