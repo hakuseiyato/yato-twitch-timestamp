@@ -14,6 +14,10 @@ const SESSION_COOKIE = 'yts_';
 const SESSION_MAX_AGE_SEC = 30 * 24 * 3600;
 const TOKEN_CACHE_TTL_MS = 3600 * 1000;
 const VALIDATE_URL = 'https://id.twitch.tv/oauth2/validate';
+const VALIDATE_TIMEOUT_MS = 10_000;
+const LAST_USED_INTERVAL_MS = 3600 * 1000;
+// Twitch のアクセストークンの形（英数字のみ）/ Shape of a Twitch access token (alphanumeric only)
+const TWITCH_TOKEN_PATTERN = /^[A-Za-z0-9]{10,200}$/;
 const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 const CLEAR_SESSION_COOKIE = `${SESSION_COOKIE}=; ${COOKIE_ATTRIBUTES}; Max-Age=0`;
 
@@ -57,11 +61,16 @@ export async function validateTwitchToken(
   }
   let res: Response;
   try {
-    res = await fetch(VALIDATE_URL, { headers: { Authorization: 'OAuth ' + token } });
+    res = await fetch(VALIDATE_URL, {
+      headers: { Authorization: 'OAuth ' + token },
+      signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS),
+    });
   } catch (cause) {
+    // タイムアウト（AbortSignal）もここに来る / Timeouts (AbortSignal) land here too
     throw new TwitchUnavailable('validate の通信に失敗 / validate request failed', { cause });
   }
-  if (res.status >= 500) throw new TwitchUnavailable(`validate ${res.status}`);
+  // 429 は Twitch 側の混雑でトークンの良し悪しではない / 429 is Twitch being busy, not a verdict on the token
+  if (res.status >= 500 || res.status === 429) throw new TwitchUnavailable(`validate ${res.status}`);
   if (res.status !== 200) {
     await env.DB.prepare('DELETE FROM token_cache WHERE hash = ?').bind(hash).run();
     return null;
@@ -91,7 +100,10 @@ async function apiTokenPrincipal(token: string, env: Env): Promise<Principal | n
   const hash = await sha256Hex(token);
   const row = await env.DB.prepare('SELECT * FROM api_tokens WHERE hash = ? AND revoked_at IS NULL').bind(hash).first<ApiTokenRow>();
   if (!row) return null;
-  await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE hash = ?').bind(nowIso(), hash).run();
+  // D1 の書き込みを抑えるため 1 時間に 1 回だけ記録 / Recorded at most once an hour to save D1 writes
+  if (row.last_used_at === null || Date.now() - Date.parse(row.last_used_at) >= LAST_USED_INTERVAL_MS) {
+    await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE hash = ?').bind(nowIso(), hash).run();
+  }
   return { login: row.login, userId: null, via: 'token' };
 }
 
@@ -139,12 +151,18 @@ export function registerAuthRoutes(router: Router): void {
   // 認証不要。Web ページが implicit grant の URL を組むのに使う / No auth. The web page builds the implicit grant URL with it
   router.add('GET', '/api/config', async ({ env }) => json(200, { twitch_client_id: env.TWITCH_CLIENT_ID }));
 
-  // Twitch トークンを検証して session cookie を発行（session がまだ無いので CSRF 対象外）
-  // Validates a Twitch token and issues the session cookie (exempt from CSRF: no session yet)
+  // Twitch トークンを検証して session cookie を発行。他サイトのフォームから攻撃者のトークンで
+  // サインインさせられないよう（login CSRF）、ここでも X-Requested-With: yts を必須にする
+  // Validates a Twitch token and issues the session cookie. X-Requested-With: yts is required here too,
+  // so a form on another site cannot sign the visitor in with the attacker's token (login CSRF)
   router.add('POST', '/api/auth/session', async ({ request, env }) => {
+    if (request.headers.get('x-requested-with') !== 'yts') return error(403, 'csrf');
     const body = await readJson<{ token?: unknown } | null>(request, 4096);
-    if (typeof body?.token !== 'string' || body.token === '') return error(400, 'token_required');
-    const validated = await validateTwitchToken(body.token, env);
+    const token = body?.token;
+    if (typeof token !== 'string' || !TWITCH_TOKEN_PATTERN.test(token) || token.startsWith('ytt_')) {
+      return error(400, 'bad_request');
+    }
+    const validated = await validateTwitchToken(token, env);
     if (!validated) return error(401, 'unauthorized');
     if (validated.clientId !== env.TWITCH_CLIENT_ID) return error(401, 'client_mismatch');
     const id = randomHex(32);

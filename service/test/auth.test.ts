@@ -19,10 +19,10 @@ function validBody(overrides: Record<string, unknown> = {}) {
   return { client_id: env.TWITCH_CLIENT_ID, login: 'yato', user_id: '1', scopes: [], expires_in: 3600, ...overrides };
 }
 
-function postSession(token: string): Promise<Response> {
+function postSession(token: string, headers: Record<string, string> = { 'x-requested-with': 'yts' }): Promise<Response> {
   return request('/api/auth/session', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify({ token }),
   });
 }
@@ -40,7 +40,7 @@ describe('auth', () => {
 
   it('POST /api/auth/session creates a session cookie', async () => {
     mockValidate(200, validBody());
-    const res = await postSession('tok-session');
+    const res = await postSession('toksession01');
     expect(res.status).toBe(200);
     const cookie = res.headers.get('set-cookie') ?? '';
     expect(cookie).toContain('yts_=');
@@ -56,7 +56,7 @@ describe('auth', () => {
 
   it('session with foreign client_id is 401 client_mismatch', async () => {
     mockValidate(200, validBody({ client_id: 'someone-else' }));
-    const res = await postSession('tok-foreign');
+    const res = await postSession('tokforeign01');
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'client_mismatch' });
     expect(res.headers.get('set-cookie')).toBeNull();
@@ -64,11 +64,45 @@ describe('auth', () => {
 
   it('validate 503 yields 503 twitch_unavailable and no token_cache row', async () => {
     mockValidate(503);
-    const res = await postSession('tok-503');
+    const res = await postSession('tok503unavailable');
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'twitch_unavailable' });
-    const row = await env.DB.prepare('SELECT hash FROM token_cache WHERE hash = ?').bind(await sha256Hex('tok-503')).first();
+    const row = await env.DB.prepare('SELECT hash FROM token_cache WHERE hash = ?').bind(await sha256Hex('tok503unavailable')).first();
     expect(row).toBeNull();
+  });
+
+  it('session POST without X-Requested-With is 403 csrf', async () => {
+    const spy = mockValidate(200, validBody());
+    const res = await postSession('toknoheader01', {});
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'csrf' });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('session POST with a malformed or ytt_ token is 400 before any fetch', async () => {
+    const spy = mockValidate(200, validBody());
+    for (const token of ['ytt_' + 'a'.repeat(32), 'short', 'has-dash-123', 'a'.repeat(201)]) {
+      const res = await postSession(token);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'bad_request' });
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('validate 429 is 503 twitch_unavailable and no token_cache row', async () => {
+    mockValidate(429);
+    const res = await request('/api/me', { headers: { authorization: 'Bearer tokratelimited01' } });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'twitch_unavailable' });
+    const row = await env.DB.prepare('SELECT hash FROM token_cache WHERE hash = ?').bind(await sha256Hex('tokratelimited01')).first();
+    expect(row).toBeNull();
+  });
+
+  it('validate fetch failure is 503 twitch_unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    const res = await request('/api/me', { headers: { authorization: 'Bearer toktimeout0001' } });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'twitch_unavailable' });
   });
 
   it('expired session is 401 and clears cookie', async () => {
@@ -83,7 +117,7 @@ describe('auth', () => {
 
   it('Bearer twitch token is cached for an hour', async () => {
     const spy = mockValidate(200, validBody());
-    const headers = { authorization: 'Bearer tok-cached' };
+    const headers = { authorization: 'Bearer tokcached01' };
     const first = await request('/api/me', { headers });
     const second = await request('/api/me', { headers });
     expect(first.status).toBe(200);
@@ -94,7 +128,7 @@ describe('auth', () => {
 
   it('Bearer twitch token of another app is 401', async () => {
     mockValidate(200, validBody({ client_id: 'someone-else' }));
-    const res = await request('/api/me', { headers: { authorization: 'Bearer tok-other-app' } });
+    const res = await request('/api/me', { headers: { authorization: 'Bearer tokotherapp01' } });
     expect(res.status).toBe(401);
   });
 
@@ -124,6 +158,31 @@ describe('auth', () => {
     const revoke = await request('/api/tokens/' + prefix, { method: 'DELETE', headers });
     expect(revoke.status).toBe(403);
     expect(await revoke.json()).toEqual({ error: 'session_required' });
+  });
+
+  it('ytt_ last_used_at is written at most once an hour', async () => {
+    const token = await seedToken('yato');
+    const hash = await sha256Hex(token);
+    const headers = { authorization: 'Bearer ' + token };
+    const lastUsed = async () =>
+      (await env.DB.prepare('SELECT last_used_at FROM api_tokens WHERE hash = ?').bind(hash).first<{ last_used_at: string | null }>())?.last_used_at;
+    const setLastUsed = (value: string) => env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE hash = ?').bind(value, hash).run();
+
+    // null なら書く / Written when null
+    expect((await request('/api/me', { headers })).status).toBe(200);
+    expect(await lastUsed()).not.toBeNull();
+
+    // 1 時間以内なら書かない / Not written within the hour
+    const recent = new Date(Date.now() - 60 * 1000).toISOString();
+    await setLastUsed(recent);
+    expect((await request('/api/me', { headers })).status).toBe(200);
+    expect(await lastUsed()).toBe(recent);
+
+    // 1 時間より古ければ書く / Written when older than an hour
+    const old = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    await setLastUsed(old);
+    expect((await request('/api/me', { headers })).status).toBe(200);
+    expect(await lastUsed()).not.toBe(old);
   });
 
   it('cookie POST without X-Requested-With is 403 csrf', async () => {
