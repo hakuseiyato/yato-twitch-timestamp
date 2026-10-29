@@ -129,6 +129,12 @@ export function requireCsrf(ctx: HandlerContext, principal: Principal): void {
   if (ctx.request.headers.get('x-requested-with') !== 'yts') throw error(403, 'csrf');
 }
 
+// Web ページ（session）からだけ許す操作。漏れた ytt_ で新しいトークンを作らせない
+// Operations allowed only from the web page (session), so a leaked ytt_ cannot mint more tokens
+function requireSession(principal: Principal): void {
+  if (principal.via !== 'session') throw error(403, 'session_required');
+}
+
 export function registerAuthRoutes(router: Router): void {
   // 認証不要。Web ページが implicit grant の URL を組むのに使う / No auth. The web page builds the implicit grant URL with it
   router.add('GET', '/api/config', async ({ env }) => json(200, { twitch_client_id: env.TWITCH_CLIENT_ID }));
@@ -182,6 +188,7 @@ export function registerAuthRoutes(router: Router): void {
   // Issues a ytt_ token for the panel. The plain text is returned once; D1 keeps only the hash
   router.add('POST', '/api/tokens', async (ctx) => {
     const principal = await requireAuth(ctx);
+    requireSession(principal);
     requireCsrf(ctx, principal);
     const body = await readJson<{ label?: unknown } | null>(ctx.request, 4096);
     const label = body?.label ?? null;
@@ -209,6 +216,7 @@ export function registerAuthRoutes(router: Router): void {
   // hash の先頭 8 桁で自分のトークンを失効させる / Revokes one of the caller's tokens by the first 8 hex of its hash
   router.add('DELETE', '/api/tokens/:prefix', async (ctx) => {
     const principal = await requireAuth(ctx);
+    requireSession(principal);
     requireCsrf(ctx, principal);
     const prefix = ctx.params.prefix;
     // hex に限り LIKE の % と _ を入れさせない / Hex only, so LIKE wildcards cannot get in

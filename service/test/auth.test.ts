@@ -105,11 +105,25 @@ describe('auth', () => {
     expect(me.status).toBe(200);
     expect(((await me.json()) as { via: string }).via).toBe('token');
 
+    // 失効は Web ページ（session）から / Revocation goes through the web page (session)
+    const cookie = await seedSession('yato');
     const prefix = (await sha256Hex(token)).slice(0, 8);
-    const revoke = await request('/api/tokens/' + prefix, { method: 'DELETE', headers });
+    const revoke = await request('/api/tokens/' + prefix, { method: 'DELETE', headers: { cookie, 'x-requested-with': 'yts' } });
     expect(revoke.status).toBe(200);
     const after = await request('/api/me', { headers });
     expect(after.status).toBe(401);
+  });
+
+  it('ytt_ Bearer cannot issue or revoke tokens (403 session_required)', async () => {
+    const token = await seedToken('yato');
+    const headers = { authorization: 'Bearer ' + token };
+    const issue = await request('/api/tokens', { method: 'POST', headers, body: JSON.stringify({ label: 'x' }) });
+    expect(issue.status).toBe(403);
+    expect(await issue.json()).toEqual({ error: 'session_required' });
+    const prefix = (await sha256Hex(token)).slice(0, 8);
+    const revoke = await request('/api/tokens/' + prefix, { method: 'DELETE', headers });
+    expect(revoke.status).toBe(403);
+    expect(await revoke.json()).toEqual({ error: 'session_required' });
   });
 
   it('cookie POST without X-Requested-With is 403 csrf', async () => {
