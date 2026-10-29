@@ -95,36 +95,45 @@ const fresh = Chat.mergeComments(seenIds, page2);
 assert.deepStrictEqual(fresh.map(r => r[0]), [999]);
 assert.strictEqual(Chat.mergeComments(seenIds, page2).length, 0);
 
-// fetchVodChat: offset で進む・cursor を送らない・重複なし・終端で止まる
-// fetchVodChat: pages by offset, never sends a cursor, no duplicates, stops at the end
+// 次の cursor の判定: hasNextPage 偽 → null、真で cursor が無い（edges 空）→ 例外（空回りしない）
+// Next-cursor decision: hasNextPage false -> null; true without a cursor (empty edges) -> throws (never spins)
+assert.strictEqual(Chat.nextCursor(parsed), page[0].data.video.comments.edges[2].cursor);
+assert.strictEqual(Chat.nextCursor({ hasNextPage: false, cursor: 'x' }), null);
+const emptyNext = Chat.parseCommentsPage([{ data: { video: { comments: { edges: [], pageInfo: { hasNextPage: true } } } } }]);
+assert.throws(() => Chat.nextCursor(emptyNext), /Next page cursor missing/);
+
+// fetchVodChat: 1 ページ目は offset 0、以降は cursor・Client-ID は TwitchDownloader の値・重複なし
+// fetchVodChat: page 1 by offset 0, then cursors; Client-ID is TwitchDownloader's; no duplicates
 function fakeNode(id, sec) {
   return { id: id, contentOffsetSeconds: sec, commenter: { login: 'u', displayName: 'U' }, message: { fragments: [{ text: id }] } };
 }
-// 窓は [offset-5, offset+20] の 3 件ずつ（5 秒おき 0..60）/ Windows of 3 comments around the offset (every 5 s, 0..60)
-const fakeAll = Array.from({ length: 13 }, (_, i) => fakeNode('c' + i, i * 5));
-async function runFake(lengthSeconds) {
+const fakePages = [
+  [fakeNode('a', 1), fakeNode('b', 2)],
+  [fakeNode('b', 2), fakeNode('c', 3)],
+  [fakeNode('d', 4)]
+];
+
+(async function () {
   const sent = [];
   global.fetch = async function (url, init) {
     const v = JSON.parse(init.body)[0].variables;
-    sent.push(v);
-    const window = fakeAll.filter(n => n.contentOffsetSeconds >= v.contentOffsetSeconds - 5).slice(0, 3);
-    const last = window.length ? window[window.length - 1].contentOffsetSeconds : 0;
+    sent.push({ v: v, clientId: init.headers['Client-ID'] });
+    const index = v.cursor === undefined ? 0 : Number(v.cursor.slice(1)) + 1;
     return { ok: true, status: 200, json: async () => [{ data: { video: { comments: {
-      edges: window.map(n => ({ cursor: 'c', node: n })), pageInfo: { hasNextPage: last < 60 } } } } }] };
+      edges: fakePages[index].map(n => ({ cursor: 'p' + index, node: n })),
+      pageInfo: { hasNextPage: index < fakePages.length - 1 } } } } }] };
   };
-  const rows = await Chat.fetchVodChat('1', null, { lengthSeconds: lengthSeconds });
-  return { rows: rows, sent: sent };
-}
-
-(async function () {
-  const a = await runFake(61);
-  assert.deepStrictEqual(a.rows.map(r => r[0]), fakeAll.map(n => n.contentOffsetSeconds));
-  assert.ok(a.sent.every(v => !('cursor' in v) && typeof v.contentOffsetSeconds === 'number'));
-  assert.strictEqual(a.sent[0].contentOffsetSeconds, 0);
-  const b = await runFake(undefined);
-  assert.strictEqual(b.rows.length, 13);
+  const rows = await Chat.fetchVodChat('9', null, {});
+  assert.deepStrictEqual(rows.map(r => r[3]), ['a', 'b', 'c', 'd']);
+  assert.deepStrictEqual(sent.map(s => s.v), [
+    { videoID: '9', contentOffsetSeconds: 0 }, { videoID: '9', cursor: 'p0' }, { videoID: '9', cursor: 'p1' }
+  ]);
+  assert.ok(sent.every(s => s.clientId === 'kd1unb4b3q4t58fwlpcbzcbnm76a8fp'));
   // 拒否は例外になる（黙って打ち切らない）/ A rejection throws (no silent truncation)
   global.fetch = async () => ({ ok: true, status: 200, json: async () => [{ errors: [{ message: 'failed integrity check' }], data: { video: { comments: null } } }] });
   await assert.rejects(Chat.fetchVodChat('1', null, {}), /Chat fetch rejected/);
+  // hasNextPage が真なのに edges が空 → 例外 / hasNextPage true with empty edges -> throws
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => [{ data: { video: { comments: { edges: [], pageInfo: { hasNextPage: true } } } } }] });
+  await assert.rejects(Chat.fetchVodChat('1', null, {}), /Next page cursor missing/);
   console.log('all tests passed');
 }()).catch(function (e) { console.error(e); process.exit(1); });

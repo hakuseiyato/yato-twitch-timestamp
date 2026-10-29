@@ -358,7 +358,12 @@
       vodCandidates = [];
       showError(messageOf(e));
     }
-    const picked = YTSChat.pickVod(vodCandidates, stream.started_at);
+    // 既定: 今の vod_id が候補にあればそれ、候補に無ければ URL 欄へ、未設定なら配信開始に近い VOD
+    // Default: the current vod_id when it is a candidate, otherwise into the URL field; when unset, the VOD nearest the stream start
+    const current = stream.vod_id ? String(stream.vod_id) : '';
+    const currentKnown = vodCandidates.some(function (v) { return String(v.id) === current; });
+    const picked = current ? (currentKnown ? { id: current } : null) : YTSChat.pickVod(vodCandidates, stream.started_at);
+    $('vod-url').value = current && !currentKnown ? current : '';
     select.replaceChildren(
       el('option', { value: '', text: vodCandidates.length ? '選んでください / Choose one' : '候補がありません / No candidates' }),
       ...vodCandidates.map(function (v) {
@@ -396,40 +401,26 @@
     }
     // 候補に無い VOD（貼り付けた URL）は長さを最後のコメントから決める / A VOD outside the candidates (pasted URL) takes its length from the last comment
     const known = vodCandidates.find(function (v) { return String(v.id) === vodId; }) || null;
-    try {
-      stream = (await api(base, { method: 'PATCH', body: { vod_id: vodId } })).stream;
-    } catch (e) {
-      showError('VOD を登録できませんでした / Could not save the VOD: ' + errorText(e));
-      return;
-    }
+    // vod_id は先に PATCH しない。PUT …/chat が成功したときにサーバーが保存する（中止・失敗では今の vod_id のまま）
+    // vod_id is not PATCHed first: PUT …/chat saves it on success (cancel or failure leaves the current vod_id as is)
     closePicker();
-    renderHead();
     await runImport(vodId, known);
   }
 
-  // vod: 候補の VOD・null（長さはコメントから）・undefined（候補を引き直して探す）
-  // vod: a candidate VOD, null (length from the comments) or undefined (look it up among fresh candidates)
+  // vod: 候補の VOD、または null（長さは最後のコメントから）/ vod: a candidate VOD, or null (length from the last comment)
   async function runImport(vodId, vod) {
     const controller = new AbortController();
     importAbort = controller;
     setImporting(true);
     setStatus($('page-status'), '');
-    progress('VOD を確認中… / Checking the VOD…');
     try {
-      if (vod === undefined) {
-        try {
-          vod = (await YTSChat.listVods(stream.channel)).find(function (v) { return String(v.id) === String(vodId); }) || null;
-        } catch (e) {
-          vod = null;
-        }
-      }
       if (vod && !(Number(vod.lengthSeconds) > 0)) {
         throw new Error('VOD の長さが 0 秒です（処理中か削除済み）/ The VOD length is 0 s (still processing or deleted)');
       }
       progress('0 件 / 0 comments');
       const rows = await YTSChat.fetchVodChat(vodId, function (n) {
         progress(n.toLocaleString() + ' 件 / ' + n.toLocaleString() + ' comments');
-      }, { signal: controller.signal, lengthSeconds: vod ? Number(vod.lengthSeconds) : undefined });
+      }, { signal: controller.signal });
       const length = vod
         ? Number(vod.lengthSeconds)
         : Math.ceil(rows.reduce(function (m, r) { return Math.max(m, Number(r[0]) || 0); }, 0));
@@ -451,14 +442,12 @@
     }
   }
 
+  // 取り込みも取り込み直しも、必ず VOD の選択から（違う VOD に直せるように）
+  // Import and re-import both start from the VOD picker (so a wrong VOD can be corrected)
   async function startImport() {
     showError('');
     if (importAbort) return;
-    if (!stream.vod_id) {
-      await openPicker();
-      return;
-    }
-    await runImport(stream.vod_id, undefined);
+    await openPicker();
   }
 
   function popOut() {

@@ -6,8 +6,13 @@
 // window.YTSChat in the browser, require() in Node.
 const YTSChat = (function () {
   const GQL_URL = 'https://gql.twitch.tv/gql';
-  // Twitch Web 版の Client-ID（GraphQL 専用） / Twitch web Client-ID (GraphQL only)
-  const GQL_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+  // GraphQL 用の Client-ID。TwitchDownloader の ChatDownloader.cs と同じ値（2026-10-29 確認）
+  // Web 版の kimne78… は cursor 指定の 2 ページ目以降が IntegrityCheckFailed になるため使わない
+  // Client-ID for GraphQL: the same value as TwitchDownloader's ChatDownloader.cs (checked 2026-10-29).
+  // The web client's kimne78… is not used: cursor pages from page 2 onward fail with IntegrityCheckFailed.
+  const GQL_CLIENT_ID = 'kd1unb4b3q4t58fwlpcbzcbnm76a8fp';
+  // 1 回の取得のページ数の上限（無限ループ防止）/ Page cap for one fetch (guards against an endless loop)
+  const MAX_PAGES = 20000;
   // TwitchDownloader の ChatDownloader.cs と同じ persisted query / Same persisted query as TwitchDownloader's ChatDownloader.cs
   const COMMENTS_HASH = 'b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a';
   const PICK_WINDOW_MS = 30 * 60 * 1000;
@@ -75,6 +80,14 @@ const YTSChat = (function () {
       fresh.push(row);
     }
     return fresh;
+  }
+
+  // parseCommentsPage の結果 → 次に送る cursor。最終ページは null。hasNextPage が真なのに cursor が無い（edges が空）なら例外
+  // parseCommentsPage result -> the cursor to send next. null on the last page. Throws when hasNextPage is true but there is no cursor (empty edges).
+  function nextCursor(parsed) {
+    if (!parsed.hasNextPage) return null;
+    if (!parsed.cursor) throw new Error('次ページの位置がありません / Next page cursor missing');
+    return parsed.cursor;
   }
 
   // VOD の URL か数字だけの ID → ID 文字列。読めなければ null
@@ -166,51 +179,34 @@ const YTSChat = (function () {
     }));
   }
 
-  // VOD のチャットを contentOffsetSeconds で先頭から逐次取得する（cursor は Twitch の integrity 検査で拒否されるため使わない）
-  // 1 ページは offset の前後の窓なので、ページ間の重複は id で除く。次の offset は前ページ最後のコメントの秒（戻らない）
-  // 新しい id が 0 件のとき: hasNextPage が偽か、次の秒が lengthSeconds を超えるなら終わり。そうでなければ 1 秒進める
-  // ページ数の上限（lengthSeconds が分かれば ceil(length/10)+50、不明なら 5000）に達したら例外（黙って打ち切らない）
-  // options: { lengthSeconds?, signal? }。signal が中止されると AbortError。onProgress(累計件数) をページごとに呼ぶ
-  // Fetches a VOD's chat sequentially by contentOffsetSeconds (no cursor: Twitch rejects it with an integrity check).
-  // A page is a window around the offset, so overlaps between pages are removed by id. The next offset is the last comment's second (never backwards).
-  // With zero new ids: stop when hasNextPage is false or the next second would pass lengthSeconds; otherwise advance one second.
-  // Hitting the page cap (ceil(length/10)+50 when lengthSeconds is known, else 5000) throws (no silent truncation).
-  // options: { lengthSeconds?, signal? }. An aborted signal gives an AbortError. onProgress(total count) runs after each page.
+  // VOD のチャットを TwitchDownloader と同じ形で逐次取得する: 1 ページ目は contentOffsetSeconds: 0、
+  // 以降は前ページ最後の edge の cursor を hasNextPage が偽になるまで。重複は id で除く（念のため）
+  // 拒否（comments: null / errors）は parseCommentsPage が例外にする。MAX_PAGES に達したら例外（黙って打ち切らない）
+  // options: { signal? }。signal が中止されると AbortError。onProgress(累計件数) をページごとに呼ぶ
+  // Fetches a VOD's chat the way TwitchDownloader does: page 1 with contentOffsetSeconds: 0,
+  // then the last edge's cursor until hasNextPage is false. Duplicates are dropped by id (just in case).
+  // Rejections (comments: null / errors) throw in parseCommentsPage. Reaching MAX_PAGES throws (no silent truncation).
+  // options: { signal? }. An aborted signal gives an AbortError. onProgress(total count) runs after each page.
   async function fetchVodChat(vodId, onProgress, options) {
-    const opts = options || {};
-    const signal = opts.signal;
-    const length = Number(opts.lengthSeconds) > 0 ? Number(opts.lengthSeconds) : null;
-    const maxPages = length !== null ? Math.ceil(length / 10) + 50 : 5000;
+    const signal = options && options.signal;
     const seenIds = new Set();
     const all = [];
-    let offset = 0;
-    for (let pageNo = 0; pageNo < maxPages; pageNo++) {
+    let variables = { videoID: String(vodId), contentOffsetSeconds: 0 };
+    for (let pageNo = 0; pageNo < MAX_PAGES; pageNo++) {
       if (signal && signal.aborted) throw new DOMException('中止しました / Aborted', 'AbortError');
       const page = await postGql([{
         operationName: 'VideoCommentsByOffsetOrCursor',
-        variables: { videoID: String(vodId), contentOffsetSeconds: offset },
+        variables: variables,
         extensions: { persistedQuery: { version: 1, sha256Hash: COMMENTS_HASH } }
       }], signal);
       const parsed = parseCommentsPage(page);
-      const fresh = mergeComments(seenIds, parsed.nodes);
-      for (const row of fresh) all.push(row);
+      for (const row of mergeComments(seenIds, parsed.nodes)) all.push(row);
       if (onProgress) onProgress(all.length);
-      const lastNode = parsed.nodes[parsed.nodes.length - 1];
-      let next = Math.max(offset, lastNode ? Number(lastNode.contentOffsetSeconds) || 0 : offset);
-      if (fresh.length === 0) {
-        if (!parsed.hasNextPage || (length !== null && offset + 1 > length)) return sortByOffset(all);
-        next = offset + 1;
-      }
-      // 終端より後ろを要求すると Twitch は comments: null を返す / Asking past the end makes Twitch return comments: null
-      if (length !== null && next > length) return sortByOffset(all);
-      offset = next;
+      const cursor = nextCursor(parsed);
+      if (cursor === null) return all;
+      variables = { videoID: String(vodId), cursor: cursor };
     }
-    throw new Error('チャット取得がページ数の上限に達しました / Chat fetch hit the page limit (' + maxPages + ')');
-  }
-
-  // 窓の重なりで順序が前後しうるので offset の昇順に揃える（安定ソート）/ Windows may interleave, so sort by offset (stable)
-  function sortByOffset(rows) {
-    return rows.sort(function (a, b) { return a[0] - b[0]; });
+    throw new Error('チャット取得がページ数の上限（' + MAX_PAGES + '）に達しました / Chat fetch hit the page limit (' + MAX_PAGES + ')');
   }
 
   return {
@@ -221,6 +217,7 @@ const YTSChat = (function () {
     pickVod: pickVod,
     buildChatJson: buildChatJson,
     mergeComments: mergeComments,
+    nextCursor: nextCursor,
     listVods: listVods,
     fetchVodChat: fetchVodChat
   };
