@@ -1,6 +1,7 @@
 // テストの共通処理 / Shared test helpers
 import { applyD1Migrations } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
+import { randomHex, sha256Hex } from '../src/auth';
 import { nowIso, type StreamRow } from '../src/db';
 
 // 未適用の migration だけを D1 に流す（何度呼んでもよい）
@@ -12,18 +13,6 @@ export async function applyMigrations(): Promise<void> {
 // Worker の fetch を相対パスで呼ぶ / Calls the Worker's fetch with a relative path
 export function request(path: string, init?: RequestInit): Promise<Response> {
   return exports.default.fetch(new Request('https://example.com' + path, init));
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function randomHex(byteLength: number): string {
-  return toHex(crypto.getRandomValues(new Uint8Array(byteLength)));
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  return toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
 }
 
 // チャンネルと owner の会員行を作る / Creates a channel and its owner's member row

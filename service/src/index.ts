@@ -1,6 +1,7 @@
 // Worker の入口。/api と /auth は router、それ以外は静的ページ
 // Worker entry point. /api and /auth go to the router, everything else to static pages
 import TSLib from '../../panel/js/lib.js';
+import { registerAuthRoutes, TwitchUnavailable } from './auth';
 import { error, json } from './http';
 import { Router } from './router';
 
@@ -12,6 +13,7 @@ router.add('GET', '/api/health', async ({ url }) => {
   if (url.searchParams.get('probe') === 'round3') return json(200, { ok: true, round3: TSLib.round3(1.23456) });
   return json(200, { ok: true });
 });
+registerAuthRoutes(router);
 
 async function handleRoute(request: Request, env: Env, url: URL): Promise<Response> {
   const found = router.match(request);
@@ -21,7 +23,10 @@ async function handleRoute(request: Request, env: Env, url: URL): Promise<Respon
   } catch (thrown) {
     // readJson などが throw した Response はそのまま返す / Return Responses thrown by readJson and friends as-is
     if (thrown instanceof Response) return thrown;
-    throw thrown;
+    if (thrown instanceof TwitchUnavailable) return error(503, 'twitch_unavailable');
+    // それ以外も {error} の形で返す / Anything else still answers in the {error} shape
+    console.error(thrown);
+    return error(500, 'internal');
   }
 }
 
