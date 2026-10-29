@@ -7,7 +7,7 @@ Records can be exported as a shared CSV sync file for the included Premiere Pro 
 ## Setup
 
 1. Register an application at [Twitch Developer Console](https://dev.twitch.tv/console).
-2. Set its category to **Other** and its client type to **Public**.
+2. Set its category to **Other** and its client type to **Confidential**. Twitch allows the implicit grant only for Confidential clients; a Public client is limited to the device code grant. Twitch issues a client secret for a Confidential client, but this project never uses it.
 3. Add this OAuth Redirect URL:
 
    ```text
@@ -149,6 +149,14 @@ Native Twitch markers are green. Other marker colors are assigned per recorder (
 
 The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves relative paths from the junction, so it cannot reach files outside the panel). `panel\install.ps1` refreshes the copy; re-run it after editing `extension/lib.js`. `node tests/test_lib.js` fails when the copy is stale.
 
+## Cloud service (`service/`)
+
+`service/` is a single Cloudflare Worker deployed to the owner's personal Cloudflare account on the Free plan. The Worker serves the JSON API under `/api/` and the static pages in `service/web/`. D1 stores channels, members, streams, stamps, sessions, and panel tokens; R2 stores one chat JSON file per VOD. Users sign in with Twitch through the same Twitch application (redirect `https://<worker-host>/auth/callback`), and only members of a channel can see its streams. `/` lists the streams of the user's channels and registers a stream from a VOD URL ("VOD から登録"). `/s/<stream_id>` is the stream page: a comment-density graph (15, 30, 60, or 120 second bins, with stamp positions drawn as vertical lines), "コメント" and "スタンプ" tabs, "別ウィンドウ" to detach the comment list to `/s/<stream_id>/comments` (it follows the graph through `BroadcastChannel`), and "ここに印" to add a stamp, recorded as the signed-in user, at the start of the selected bin. "チャットを取り込む" makes the browser fetch the VOD's chat replay directly from Twitch GraphQL and upload it to the Worker once; the Worker stores the body in R2 without parsing it, and importing again overwrites it. Comment times are shifted by the stream's "VOD のずれ" and "反応の遅れ" (default five seconds) settings. `/me` issues panel tokens and `/admin` creates channels and manages members.
+
+The Chrome extension and the Adobe panel do not talk to the service yet; sending stamps from the extension and synchronizing the panel with the service are planned as follow-ups. Today the service is used through its web pages, and the CSV sync file workflow above is unchanged.
+
+See [`service/README.md`](service/README.md) (Japanese) for setup, local development, tests, and operations. The test fixture `service/test/fixtures/gql_comments_page.json` is one page of chat replay taken from a real public Twitch VOD, so it contains public chat messages and the commenters' Twitch logins.
+
 ## Limitations
 
 - Timestamping is available only while the channel is live.
@@ -179,4 +187,6 @@ node tests/test_lib.js --write-sample
 - `panel/` — CEP panel for Premiere Pro and After Effects, including host-specific ExtendScript adapters and the development installer.
 - `tools/gen_key.js` — ephemeral RSA public-key and extension-ID generator.
 - `tests/test_lib.js` — dependency-free Node assertion tests, including sync planner coverage.
+- `service/` — Cloudflare Worker (D1 + R2 + static pages) for the cloud service; see `service/README.md`.
+- `tests/test_service_web.js` — dependency-free Node tests for the service's page logic (bins, chat shaping, VOD selection).
 - `samples/sample.csv` — example sync-file data including a multiline Japanese memo.

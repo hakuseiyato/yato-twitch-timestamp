@@ -4,6 +4,8 @@
 
 Yato Twitch Timestamp is a Manifest V3 Chrome extension for recording useful moments during Twitch live streams. Broadcasters and editors can create native Twitch markers, while moderators without permission fall back to local records through the same action. Every record is stored locally and can be exported as a CSV sync file shared with one CEP panel that supports both Premiere Pro and After Effects.
 
+`service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension and the panel do not call the service yet.
+
 ## Technology stack
 
 - JavaScript for Chrome Extension Manifest V3, the Adobe CEP panel, and Node.js tests and tools
@@ -12,8 +14,14 @@ Yato Twitch Timestamp is a Manifest V3 Chrome extension for recording useful mom
 - Twitch Helix API and Twitch OAuth implicit grant
 - `chrome.identity`, `chrome.storage.local`, `chrome.storage.session`, and `chrome.commands`
 - CEP `CSInterface` and Node-enabled panel APIs for host bridging and atomic file updates
+- `service/`: TypeScript on Cloudflare Workers (Free plan), with Workers Static Assets for the pages
+- `service/`: Cloudflare D1 (SQLite) for channels, members, streams, stamps, sessions, panel tokens, and the Twitch token-validation cache
+- `service/`: Cloudflare R2 for chat replay JSON
+- `service/`: `wrangler` for local development, migrations, and deployment
+- `service/`: `vitest` with `@cloudflare/vitest-plugin` for Worker tests in workerd, and `tsc` for type checking
+- `service/web/`: plain HTML, CSS, and JavaScript with `<canvas>` for the graph; Twitch GraphQL (unofficial) for chat replay and Helix `GET /videos` for VOD registration
 
-The project has no external libraries, package manager, or build step.
+The extension and the panel have no external libraries, package manager, or build step. `service/` uses npm for development dependencies only (`wrangler`, `typescript`, `vitest`, `@cloudflare/vitest-plugin`, `@cloudflare/workers-types`); its runtime dependencies are empty.
 
 ## Dependencies
 
@@ -22,6 +30,7 @@ The project has no external libraries, package manager, or build step.
 - Node.js only for tests and public-key generation
 - Adobe Premiere Pro 22+ when synchronizing Premiere sequences
 - Adobe After Effects 22+ when synchronizing compositions
+- Node.js 20+, npm, and a Cloudflare account when developing or deploying `service/`
 
 ## Project structure
 
@@ -42,6 +51,20 @@ The project has no external libraries, package manager, or build step.
 - `tools/gen_key.js`: Manifest public-key, fixed extension-ID, and redirect-URL generator
 - `tests/test_lib.js`: dependency-free unit tests for `extension/lib.js`, including the sync planner
 - `samples/sample.csv`: sample sharing and synchronization format
+- `service/wrangler.jsonc`: Worker name, Static Assets (`web/`, Worker runs first), D1 binding `DB` (`yts`), R2 binding `CHAT` (`yts-chat`), and `vars.TWITCH_CLIENT_ID`
+- `service/migrations/0001_init.sql`: D1 schema (seven tables; stamps keyed by `(stream_id, id)`)
+- `service/src/index.ts`: Worker entry; sends `/api/` and `/auth/` to the router and everything else to Static Assets, mapping `/s/<id>` and `/s/<id>/comments` to `s.html` and `comments.html`
+- `service/src/router.ts` / `service/src/http.ts`: method-and-path router, and JSON response and request-body helpers
+- `service/src/auth.ts`: session cookie, `ytt_` panel tokens, Twitch token validation with a one-hour cache, and the auth and token routes
+- `service/src/access.ts`: site admin (`BOOTSTRAP_LOGIN`) and per-channel `owner` / `editor` checks
+- `service/src/members.ts`: channel creation and member management routes
+- `service/src/streams.ts`: stream registration, listing, reading, and settings updates
+- `service/src/stamps.ts`: stamp upsert (later `updated_at` wins, tombstones only by the author or an owner) and stamp listing
+- `service/src/chat.ts`: streams the uploaded chat JSON into R2 without parsing it and serves it back
+- `service/web/`: pages `index.html` (stream list), `auth/callback.html`, `s.html` (stream page), `comments.html` (detached comment list), `me.html`, `admin.html`, and `css/app.css`
+- `service/web/js/`: `api.js` (API calls and sign-in), `chat-fetch.js` (Twitch GraphQL chat fetch and shaping), `bins.js` (binning and time shift), `graph.js` (canvas graph), page scripts, and `lib.js` (copy of `panel/js/lib.js` made by `npm run build:web`)
+- `service/test/`: Worker tests run by `npm test`; `fixtures/gql_comments_page.json` is one chat page from a real public VOD
+- `tests/test_service_web.js`: dependency-free Node tests for the pure logic in `service/web/js`
 
 The former standalone After Effects CSV importer is removed. Both Adobe hosts now use the same panel, sync file, and synchronization model.
 
@@ -130,6 +153,10 @@ Move, memo edit, addition, and deletion are supported in both directions. Clicki
 
 After host application, `applyNudges` updates records with any After Effects collision adjustments, `finalizeRecords` filters or finalizes CSV changes based on operation results, and `baseFromMarkers` rebuilds the sidecar base from a fresh marker listing. Together with `mergeFresh` and `sameMarkers`, these helpers are implemented in `extension/lib.js` and shared by the panel. The result preserves concurrent edits, retries failed operations on later syncs, and never commits a proposed row for an untagged marker whose tag operation failed.
 
+## Service data flow
+
+The browser signs in through the Twitch implicit grant, returns to `/auth/callback`, and posts the token to `POST /api/auth/session`; the Worker validates it with Twitch and issues its own 30-day session cookie without storing the Twitch token. For "チャットを取り込む", the stream page fetches the VOD's chat replay page by page directly from Twitch GraphQL, shapes it into `[offset_sec, login, display_name, text]` rows, and sends the whole JSON once with `PUT /api/streams/<id>/chat`. The Worker streams the body into R2 at `chat/<channel>/<vod_id>.json` and updates the stream row in D1. The page then reads the JSON back with `GET /api/streams/<id>/chat` and bins it in the browser; comment times are shifted by `vod_offset_sec - chat_lag_sec`. Stamps, including "ここに印" from the stream page, go to D1 through `POST /api/stamps` with the same columns as the CSV sync file; the later `updated_at` wins and deletions are `deleted=1` tombstones. The Worker never parses chat JSON, which keeps each request within the Free plan's CPU limit.
+
 ## Running the project
 
 1. The Manifest `key` is already configured for extension ID `nkebinaanllmgbkpehnlcaomjcofdnng`.
@@ -141,3 +168,5 @@ After host application, `applyNudges` updates records with any After Effects col
 The installer copies `extension/lib.js` to `panel/js/lib.js` on every run (the panel loads the copy); the test suite checks that the copy is current.
 
 Run tests with `node tests/test_lib.js`.
+
+For `service/` setup, local development, tests, and deployment, see `service/README.md`.
