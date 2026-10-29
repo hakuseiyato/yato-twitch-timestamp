@@ -19,7 +19,7 @@
       "binding": "DB",
       "database_name": "yts",
       // 本番の ID はデプロイ時に差し替える / Replace with the real ID before deploying
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "56a10d0e-84a7-4458-bb54-a386491b0ef6",
       "migrations_dir": "migrations"
     }
   ],
@@ -28,6 +28,6 @@
     { "binding": "CHAT", "bucket_name": "yts-chat" }
   ],
   "vars": {
-    "TWITCH_CLIENT_ID": ""
+    "TWITCH_CLIENT_ID": "105fdov1w7trd0swseu50l5qy2sckg"
   }
 }
