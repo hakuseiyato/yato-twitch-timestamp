@@ -595,7 +595,131 @@ async function testDeleteStreamIsLocalOnly() {
   assert.deepStrictEqual(stampsCalls(fetchImpl).map((c) => JSON.parse(c.init.body).records.map((r) => r.id)), [['y0000003']]);
 }
 
+// validate の 401 ではトークンだけ消し、login は残す。次の打刻も by は自分。再ログインで送り直す（Ruling 13）
+// A validate 401 clears only the token and keeps login; the next stamp is still by us; logging in resends (Ruling 13).
+async function testExpiredTokenKeepsLoginForStamps() {
+  const startedAt = new Date(Date.now() - 600000).toISOString();
+  const fc = createFakeChrome({
+    settings: { clientId: 'cid', lagSec: 5, serverUrl: PROD_ORIGIN },
+    auth: { token: 'tok', login: 'mod1', userId: '1' },
+    records: []
+  }, { lastStreams: { terano_naa: { id: '999', started_at: startedAt, user_id: '55', clockSkewMs: 0, savedAt: Date.now() } } });
+  fc.calls.permissions.add(PROD_ORIGIN + '/*');
+  const fetchImpl = fakeFetch([
+    { match: (u, init) => u.startsWith('https://id.twitch.tv/oauth2/validate') && init.headers.Authorization === 'OAuth tok',
+      respond: () => ({ status: 401, body: { status: 401, message: 'invalid access token' } }) },
+    { match: (u) => u.startsWith('https://id.twitch.tv/oauth2/validate'),
+      respond: () => ({ status: 200, body: { client_id: 'cid', login: 'mod1', user_id: '1', scopes: ['channel:manage:broadcast'] } }) },
+    { match: (u) => u === STAMPS_URL, respond: acceptAll }
+  ]);
+  const bg = loadBackground(fc, fetchImpl);
+  const first = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: 'a' });
+  assert.strictEqual(first.record.by, 'mod1');
+  assert.strictEqual(fc.storage.auth.token, '');
+  assert.strictEqual(fc.storage.auth.login, 'mod1');
+  assert.strictEqual(fc.storage.auth.userId, '1');
+  // トークンが無いので validate を呼ばずキャッシュで保存 / No token: validate is skipped and the cached stream is used
+  const validateCalls = fetchImpl.calls.filter((c) => c.url.startsWith('https://id.twitch.tv/oauth2/validate')).length;
+  const second = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: 'b' });
+  assert.strictEqual(fetchImpl.calls.filter((c) => c.url.startsWith('https://id.twitch.tv/oauth2/validate')).length, validateCalls);
+  assert.strictEqual(second.record.by, 'mod1');
+  let state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.auth.expired, true);
+  await bg.uploadPending();
+  assert.strictEqual(stampsCalls(fetchImpl).length, 0);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), [first.record.id, second.record.id].sort());
+
+  // 再ログインで expired が消え、未送信が by: mod1 で届く / Logging in clears expired and the pending records go up with by: mod1
+  fc.chrome.identity.launchWebAuthFlow = async (details) => {
+    const nonce = new URL(details.url).searchParams.get('state');
+    return 'https://fakeextensionid.chromiumapp.org/#access_token=tok2&state=' + nonce;
+  };
+  await bg.handleMessage({ type: 'login' });
+  await bg.uploadPending();
+  assert.strictEqual(fc.storage.auth.expired, undefined);
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.ok(!state.auth.expired);
+  const sent = stampsCalls(fetchImpl).flatMap((c) => JSON.parse(c.init.body).records);
+  assert.deepStrictEqual(sent.map((r) => r.id).sort(), [first.record.id, second.record.id].sort());
+  assert.ok(sent.every((r) => r.by === 'mod1'));
+  assert.deepStrictEqual(fc.storage.pending, []);
+
+  // ログアウトは全部消す / Logout clears everything
+  await bg.handleMessage({ type: 'logout' });
+  assert.deepStrictEqual(fc.storage.auth, { token: '', login: '', userId: '' });
+}
+
+// 送信中にサーバー URL が変わったら、古いサーバーの応答は反映せず残りのバッチも送らない（Ruling 14）
+// If the server URL changes mid-flight, the old server's answer is not applied and no further batch is sent (Ruling 14).
+async function testServerUrlChangedMidFlightIgnoresResult() {
+  const fc = syncChrome({ records: [makeRecord('y0000001', '999'), makeRecord('y0000002', '888')], pending: ['y0000001', 'y0000002'] });
+  let bg;
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: async (u, init) => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: 'https://other.example' } });
+    return acceptAll(u, init);
+  } }]);
+  bg = loadBackground(fc, fetchImpl);
+  await bg.uploadPending();
+  // 保存が始めた送信も待つ（B には権限が無いので送らない） / Also wait for the upload the save started (no permission for B, nothing sent)
+  await bg.uploadPending();
+  assert.strictEqual(stampsCalls(fetchImpl).length, 1);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), ['y0000001', 'y0000002']);
+  assert.deepStrictEqual(fc.storage.synced, []);
+  assert.deepStrictEqual(fc.storage.failed, []);
+}
+
+// 200 でも accepted / rejected が配列でなければ再送扱い（Ruling 15）
+// A 200 without accepted / rejected arrays is retried (Ruling 15).
+async function testMalformedOkBodyIsRetryable() {
+  for (const body of [{}, null, { accepted: ['y0000001'] }]) {
+    const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'], synced: [] });
+    const bg = loadBackground(fc, fakeFetch([{ match: (u) => u === STAMPS_URL, respond: () => ({ status: 200, body: body }) }]));
+    const summary = await bg.uploadPending();
+    assert.strictEqual(summary.error, 'http_200', JSON.stringify(body));
+    assert.strictEqual(summary.accepted, 0);
+    assert.strictEqual(fc.storage.lastSync.error, 'http_200');
+    assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+    assert.deepStrictEqual(fc.storage.synced, []);
+  }
+}
+
+// 他人の墓標は取り込み・同期で送信待ちにしない。自分の墓標は大文字小文字を無視して送る（Ruling 16）
+// Others' tombstones are not queued by import / sync; our own are, case-insensitively (Ruling 16).
+async function testOthersTombstonesAreNotQueued() {
+  const incoming = [
+    makeRecord('y0000001', '999', { by: 'someone_else' }),
+    makeRecord('y0000002', '999', { by: 'someone_else', deleted: true, offset_sec: 20 }),
+    makeRecord('y0000003', '999', { by: 'Mod1', deleted: true, offset_sec: 30 })
+  ];
+  // importRecords（権限なしにして送信を止め、pending を見る） / importRecords (no permission, so pending can be inspected)
+  let fc = syncChrome({}, { permission: false });
+  let bg = loadBackground(fc, fakeFetch([]));
+  await bg.handleMessage({ type: 'importRecords', records: incoming });
+  assert.strictEqual(fc.storage.records.length, 3);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), ['y0000001', 'y0000003']);
+  // 取り込みが始めた送信を終わらせてから次の偽 chrome を読む / Let the upload the import started finish before loading the next fake chrome
+  await bg.uploadPending();
+
+  // syncNow
+  fc = syncChrome({ records: incoming, pending: [] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  bg = loadBackground(fc, fetchImpl);
+  await bg.handleMessage({ type: 'syncNow' });
+  assert.deepStrictEqual(stampsCalls(fetchImpl).flatMap((c) => JSON.parse(c.init.body).records.map((r) => r.id)).sort(), ['y0000001', 'y0000003']);
+
+  // login が無ければ墓標は全部外す / Without a login every tombstone is left out
+  fc = syncChrome({ records: incoming, pending: [], auth: { token: '', login: '', userId: '' } });
+  bg = loadBackground(fc, fakeFetch([]));
+  await bg.handleMessage({ type: 'syncNow' });
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+}
+
 (async () => {
+  await testExpiredTokenKeepsLoginForStamps();
+  await testServerUrlChangedMidFlightIgnoresResult();
+  await testMalformedOkBodyIsRetryable();
+  await testOthersTombstonesAreNotQueued();
   await testStampWithoutEditorFallsBackToLocal();
   await testUnmockedFetchIsReported();
   await testSaveSettingsServerUrl();

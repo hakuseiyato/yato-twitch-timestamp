@@ -472,6 +472,8 @@ const TSLib = (function () {
     unauthorized: 'ログインが必要です / login required',
     login_required: 'ログインが必要です / login required',
     network: '通信できませんでした / network error',
+    // 200 だが本文が accepted / rejected の形でない / A 200 whose body lacks accepted / rejected
+    http_200: 'サーバーの応答が不正です / unexpected server response',
     internal: '拡張の内部エラー / extension internal error'
   };
 

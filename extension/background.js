@@ -70,6 +70,15 @@ async function addPending(ids) {
   return next;
 }
 
+// 送信待ちにする id。他人の墓標はサーバーが forbidden_tombstone で拒むので入れない（login が無ければ墓標は全部外す。Ruling 16）
+// Ids to queue. Others' tombstones are left out since the server rejects them as forbidden_tombstone (no login: every tombstone is left out; Ruling 16).
+function uploadableIds(records, login) {
+  const me = String(login || '').toLowerCase();
+  return TSLib.mergeRecords(records).filter(function (record) {
+    return record.deleted !== true || (me !== '' && String(record.by || '').toLowerCase() === me);
+  }).map(function (record) { return record.id; });
+}
+
 function enqueue(ids) {
   return serializedStorage(function () { return addPending(ids); });
 }
@@ -151,15 +160,22 @@ async function uploadBatch(serverUrl, token, batch, summary) {
   const body = await readJson(response);
 
   if (response.ok) {
-    const accepted = Array.isArray(body.accepted) ? body.accepted : [];
-    const rejected = Array.isArray(body.rejected) ? body.rejected : [];
+    // accepted / rejected が配列でない 200 は届いたか分からないので再送する（Ruling 15）
+    // A 200 without accepted / rejected arrays may not have been stored, so it is retried (Ruling 15).
+    if (!Array.isArray(body.accepted) || !Array.isArray(body.rejected)) {
+      summary.error = 'http_' + response.status;
+      return true;
+    }
+    const accepted = body.accepted;
+    const rejected = body.rejected;
     // accepted と stale は成功。以前の失敗記録から外す / accepted and stale are successes; drop their old failures
     const succeeded = new Set(accepted.concat(rejected.filter(function (item) { return item.reason === 'stale'; }).map(function (item) { return item.id; })));
-    summary.accepted += accepted.length;
-    summary.rejected += rejected.filter(function (item) { return item.reason !== 'stale'; }).length;
     const sentAt = new Map(batch.records.map(function (record) { return [record.id, record.updated_at]; }));
-    await serializedStorage(async function () {
+    const applied = await serializedStorage(async function () {
       const current = await readState();
+      // 送信中にサーバー URL が変わったら古いサーバーの結果は捨てる（Ruling 14）
+      // The server URL changed while in flight: drop the old server's result (Ruling 14).
+      if (current.settings.serverUrl !== serverUrl) return false;
       const result = TSLib.applyUploadResult(current.pending, current.failed, ids, body);
       // 送信中に直された記録は送り直す / Records edited while in flight are sent again
       const edited = TSLib.mergeRecords(current.records).filter(function (record) {
@@ -169,7 +185,12 @@ async function uploadBatch(serverUrl, token, batch, summary) {
       const failed = result.failed.filter(function (entry) { return !succeeded.has(entry.id); });
       const synced = current.synced.concat(Array.from(succeeded).filter(function (id) { return current.synced.indexOf(id) < 0; }));
       await chrome.storage.local.set({ pending: pending, failed: failed, synced: synced });
+      return true;
     });
+    // 反映しなかったら残りのバッチも送らない / Not applied: stop the remaining batches too
+    if (!applied) return true;
+    summary.accepted += accepted.length;
+    summary.rejected += rejected.filter(function (item) { return item.reason !== 'stale'; }).length;
     return false;
   }
 
@@ -387,7 +408,11 @@ async function handleStamp(message) {
       'ログイン情報を確認できませんでした');
   }
   if (validation.response.status === 401) {
-    await serializedStorage(function () { return chrome.storage.local.set({ auth: { token: '', login: '', userId: '' } }); });
+    // トークンだけ消し、login / userId は残す（次の打刻の by に使う）。印は expired（Ruling 13）
+    // Clear only the token and keep login / userId (used as by for later stamps); mark it expired (Ruling 13).
+    await serializedStorage(function () {
+      return chrome.storage.local.set({ auth: { token: '', login: state.auth.login, userId: state.auth.userId, expired: true } });
+    });
     return saveFromCache(channel, storedLogin || 'unknown', memo, t0, lagSec,
       'ログインの有効期限が切れました。前回の配信情報でローカル保存しました。再ログインしてください',
       'ログインの有効期限が切れました');
@@ -493,7 +518,7 @@ async function handleMessage(message) {
         const merged = TSLib.mergeRecords(state.records, incoming);
         await chrome.storage.local.set({ records: merged });
         // 取り込んだ記録もサーバーへ送る / Imported records are uploaded too
-        await addPending(TSLib.mergeRecords(incoming).map(function (record) { return record.id; }));
+        await addPending(uploadableIds(incoming, state.auth.login));
         return { added: merged.length - state.records.length };
       }).then(function (result) {
         kickUpload();
@@ -501,9 +526,9 @@ async function handleMessage(message) {
       });
     }
     case 'syncNow': {
-      // 手元の全記録（墓標を含む）を送り直す / Resend every local record, tombstones included
+      // 手元の全記録（自分の墓標を含む）を送り直す / Resend every local record, our own tombstones included
       const state = await readState();
-      await enqueue(TSLib.mergeRecords(state.records).map(function (record) { return record.id; }));
+      await enqueue(uploadableIds(state.records, state.auth.login));
       return uploadPending();
     }
     case 'clearFailed':

@@ -50,11 +50,11 @@ The extension can send every stamp to the cloud service (`service/`) as well as 
 Setup:
 
 1. Keep the Client ID as prefilled (the Worker accepts only tokens issued for its own Twitch application) and keep the Redirect URL registered as in [Setup](#setup); nothing changes there.
-2. Enter the server origin in "サーバー URL / Server URL", for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` is accepted (no path, query, or fragment).
+2. Enter the server origin in "サーバー URL / Server URL", for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` or `https://host:port` is accepted (no path, query, or fragment).
 3. Click "このサーバーへの送信を許可 / Allow sending to this server" and accept Chrome's prompt. The extension declares the server only as an optional host permission, so Chrome blocks requests to it until you grant it for that origin. Once granted, the popup syncs immediately.
+4. Make sure you are logged in. The Worker checks the Twitch token and accepts stamps only for channels where your Twitch login is a member (`/admin`).
 
 Saving a different server URL queues every local record (tombstones included) for the new server and forgets which records the previous server had received or rejected.
-4. Make sure you are logged in. The Worker checks the Twitch token and accepts stamps only for channels where your Twitch login is a member (`/admin`).
 
 Behavior:
 

@@ -272,6 +272,7 @@ for (const code of ['http_500', 'http_502', 'http_503', 'http_599', 'http_408', 
 for (const code of ['http_400', 'http_403', 'http_404', 'http_405', 'http_413']) {
   assert.strictEqual(TSLib.reasonText(code), 'サーバーが要求を拒否しました (' + code + ') / server rejected the request (' + code + ')', code);
 }
+assert.strictEqual(TSLib.reasonText('http_200'), 'サーバーの応答が不正です / unexpected server response');
 assert.strictEqual(TSLib.reasonText('http_302'), 'サーバーに届きませんでした (http_302) / server unreachable (http_302)');
 assert.strictEqual(TSLib.reasonText('internal'), '拡張の内部エラー / extension internal error');
 assert.strictEqual(TSLib.reasonText('csrf'), 'csrf');
