@@ -408,6 +408,90 @@ const TSLib = (function () {
     }).map(function (item) { return item.record; });
   }
 
+  // 削除を墓標（deleted: true）にしたコピーを返す。他の列は変えない
+  // Returns a copy turned into a tombstone (deleted: true); other columns are unchanged.
+  function tombstoneRecord(record, nowIso) {
+    return Object.assign({}, record, { deleted: true, updated_at: nowIso });
+  }
+
+  // 送信待ちの id を stream_id ごと・maxPerRequest 件ごとのバッチにする（並びは records の初出順）
+  // Groups pending ids into batches per stream_id of at most maxPerRequest records (in first-appearance order of records).
+  function planUpload(records, pendingIds, maxPerRequest) {
+    const limit = Math.max(1, Math.floor(Number(maxPerRequest)) || 500);
+    const pending = new Set(pendingIds || []);
+    // 同じ id が複数あれば updated_at が新しい方 / For duplicate ids, the newer updated_at wins
+    const latest = new Map();
+    (records || []).forEach(function (record) {
+      if (!record || !pending.has(record.id)) return;
+      const current = latest.get(record.id);
+      if (!current || Date.parse(record.updated_at) > Date.parse(current.updated_at)) latest.set(record.id, record);
+    });
+    const byStream = new Map();
+    latest.forEach(function (record) {
+      if (!byStream.has(record.stream_id)) byStream.set(record.stream_id, []);
+      byStream.get(record.stream_id).push(record);
+    });
+    const batches = [];
+    byStream.forEach(function (list, streamId) {
+      for (let i = 0; i < list.length; i += limit) batches.push({ stream_id: streamId, records: list.slice(i, i + limit) });
+    });
+    return batches;
+  }
+
+  // サーバーの応答を送信キューに反映する。accepted と stale は送信済み、他の rejected は失敗として記録
+  // Applies the server response to the upload queue: accepted and stale are done, other rejections are recorded as failures.
+  function applyUploadResult(pendingIds, failed, sent, response) {
+    const res = response || {};
+    const done = new Set(res.accepted || []);
+    const nextFailed = (failed || []).slice();
+    const at = new Date().toISOString();
+    (res.rejected || []).forEach(function (item) {
+      done.add(item.id);
+      if (item.reason === 'stale') return;
+      const entry = { id: item.id, reason: item.reason, at: at };
+      const index = nextFailed.findIndex(function (old) { return old.id === item.id; });
+      if (index >= 0) nextFailed[index] = entry;
+      else nextFailed.push(entry);
+    });
+    // sent のうち応答に出ない id は残す（done に入らないので消えない）
+    // Sent ids missing from the response stay (they are not in done, so they are kept).
+    return {
+      pendingIds: (pendingIds || []).filter(function (id) { return !done.has(id); }),
+      failed: nextFailed
+    };
+  }
+
+  // 再送で直る見込みがある応答か（0 = ネットワーク例外 / 408 / 429 / 5xx）
+  // Whether a retry may succeed (0 = network failure / 408 / 429 / 5xx).
+  function isRetryableUpload(status) {
+    const code = Number(status);
+    return code === 0 || code === 408 || code === 429 || (code >= 500 && code <= 599);
+  }
+
+  function toBoolean(value) {
+    return value === true || value === 1 || String(value).trim().toLowerCase() === 'true' || String(value).trim() === '1';
+  }
+
+  // サーバーの 13 列（StampRecord）に整形する / Shapes a record into the server's 13 columns (StampRecord)
+  function toUploadRecord(record) {
+    const offset = round3(record.offset_sec);
+    return {
+      id: record.id,
+      timecode: formatTimecode(Math.floor(offset)),
+      offset_sec: offset,
+      by: record.by,
+      memo: record.memo === undefined || record.memo === null ? '' : record.memo,
+      native: toBoolean(record.native),
+      channel: record.channel,
+      stream_id: record.stream_id,
+      started_at: record.started_at,
+      created_at: record.created_at,
+      updated_at: record.updated_at || record.created_at,
+      deleted: toBoolean(record.deleted),
+      clock_skew_ms: Number(record.clock_skew_ms) || 0
+    };
+  }
+
   function groupByStream(records) {
     const groups = new Map();
     for (const record of records) {
@@ -1050,7 +1134,12 @@ const TSLib = (function () {
     recordsFromMarkers: recordsFromMarkers,
     detectCsvFormat: detectCsvFormat,
     convertDualPlayer: convertDualPlayer,
-    dualPlayerStreamId: dualPlayerStreamId
+    dualPlayerStreamId: dualPlayerStreamId,
+    tombstoneRecord: tombstoneRecord,
+    planUpload: planUpload,
+    applyUploadResult: applyUploadResult,
+    isRetryableUpload: isRetryableUpload,
+    toUploadRecord: toUploadRecord
   };
 }());
 

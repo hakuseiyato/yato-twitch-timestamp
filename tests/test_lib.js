@@ -231,6 +231,32 @@ assert.strictEqual(TSLib.mergeRecords([newVersion], [tieVersion])[0].memo, 'new'
 const tombstone = Object.assign({}, newVersion, { updated_at: '2026-01-03T00:00:00Z', deleted: true });
 assert.strictEqual(TSLib.mergeRecords([newVersion], [tombstone])[0].deleted, true);
 
+// 墓標化・送信バッチ・応答の反映（サーバー送信キュー）
+// Tombstoning, upload batches and applying the response (server upload queue)
+const tombSource = { id: 'y0000001', memo: 'a', deleted: false, updated_at: '2026-01-01T00:00:00.000Z' };
+const t = TSLib.tombstoneRecord(tombSource, '2026-02-01T00:00:00.000Z');
+assert.strictEqual(t.deleted, true); assert.strictEqual(t.updated_at, '2026-02-01T00:00:00.000Z'); assert.strictEqual(t.memo, 'a');
+assert.strictEqual(tombSource.deleted, false);
+const recs = [{ id: 'a', stream_id: 's1' }, { id: 'b', stream_id: 's1' }, { id: 'c', stream_id: 's2' }];
+const uploadPlan = TSLib.planUpload(recs, ['a', 'c', 'zzz'], 500);
+assert.deepStrictEqual(uploadPlan.map(p => [p.stream_id, p.records.map(r => r.id)]), [['s1', ['a']], ['s2', ['c']]]);
+assert.strictEqual(TSLib.planUpload([{ id: 'a', stream_id: 's1' }, { id: 'b', stream_id: 's1' }], ['a', 'b'], 1).length, 2);
+// 既定は 500 件ごと / The default batch size is 500
+const manyRecs = Array.from({ length: 1001 }, (_, i) => ({ id: 'r' + i, stream_id: 's1' }));
+assert.deepStrictEqual(TSLib.planUpload(manyRecs, manyRecs.map(r => r.id)).map(p => p.records.length), [500, 500, 1]);
+const r = TSLib.applyUploadResult(['a', 'b', 'c', 'd'], [], ['a', 'b', 'c'], { accepted: ['a'], rejected: [{ id: 'b', reason: 'stale' }, { id: 'c', reason: 'forbidden_tombstone' }] });
+assert.deepStrictEqual(r.pendingIds, ['d']); assert.strictEqual(r.failed.length, 1); assert.strictEqual(r.failed[0].reason, 'forbidden_tombstone');
+// 応答に出ない id は残し、同じ id の失敗は上書き / IDs missing from the response stay; a repeated failure overwrites
+const prevFailed = [{ id: 'c', reason: 'invalid_id', at: 'old' }];
+const r2 = TSLib.applyUploadResult(['a', 'c', 'e'], prevFailed, ['a', 'c', 'e'], { accepted: ['a'], rejected: [{ id: 'c', reason: 'missing_stream' }] });
+assert.deepStrictEqual(r2.pendingIds, ['e']); assert.strictEqual(r2.failed.length, 1); assert.strictEqual(r2.failed[0].reason, 'missing_stream');
+assert.notStrictEqual(r2.failed[0].at, 'old'); assert.strictEqual(prevFailed[0].reason, 'invalid_id');
+assert.strictEqual(TSLib.isRetryableUpload(0), true); assert.strictEqual(TSLib.isRetryableUpload(503), true); assert.strictEqual(TSLib.isRetryableUpload(401), false); assert.strictEqual(TSLib.isRetryableUpload(413), false);
+assert.strictEqual(TSLib.isRetryableUpload(408), true); assert.strictEqual(TSLib.isRetryableUpload(429), true); assert.strictEqual(TSLib.isRetryableUpload(403), false);
+const u = TSLib.toUploadRecord({ id: 'y1', offset_sec: 61.2345, native: 'true', deleted: 0, created_at: '2026-01-01T00:00:00.000Z', by: 'x', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' });
+assert.strictEqual(u.timecode, '00:01:01'); assert.strictEqual(u.offset_sec, 61.235); assert.strictEqual(u.native, true); assert.strictEqual(u.deleted, false); assert.strictEqual(u.updated_at, u.created_at); assert.strictEqual(u.clock_skew_ms, 0);
+assert.deepStrictEqual(Object.keys(u), ['id', 'timecode', 'offset_sec', 'by', 'memo', 'native', 'channel', 'stream_id', 'started_at', 'created_at', 'updated_at', 'deleted', 'clock_skew_ms']);
+
 const otherStream = {
   stream_id: 'newer', channel: 'beta', started_at: '2026-02-01T00:00:00Z',
   offset_sec: 4, created_at: '', clock_skew_ms: 0, by: 'editor', memo: '', native: false
