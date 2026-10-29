@@ -63,6 +63,7 @@ function createFakeChrome(initialStorage, initialSession) {
       },
       onAlarm: { addListener: (fn) => { calls.alarmHandler = fn; } }
     },
+    // 拒否を試すテストは fc.chrome.permissions.request を上書きする / Override fc.chrome.permissions.request to simulate a denial
     permissions: {
       contains: async (query) => (query.origins || []).every((origin) => calls.permissions.has(origin)),
       request: async (query) => {
@@ -88,6 +89,7 @@ function loadBackground(fakeChrome, fetchImpl) {
 }
 
 // routes: [{ match(url, init) => boolean, respond(url, init) => { status, body, headers? } }]
+// headers 未指定の Date は現在時刻 / A missing Date header defaults to the current time
 // 最初に一致した route が応答する。respond が throw すると通信失敗になる
 // The first matching route answers; a throwing respond simulates a network failure.
 function fakeFetch(routes) {
@@ -98,7 +100,9 @@ function fakeFetch(routes) {
     const answer = await route.respond(url, init);
     const status = answer.status;
     const body = answer.body;
-    const headers = answer.headers || {};
+    // ヘッダ名は大文字小文字を区別しない / Header names are case-insensitive
+    const headers = {};
+    Object.keys(answer.headers || {}).forEach((key) => { headers[key.toLowerCase()] = answer.headers[key]; });
     return {
       ok: status >= 200 && status < 300,
       status: status,

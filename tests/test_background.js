@@ -6,6 +6,10 @@ const assert = require('assert');
 const { createFakeChrome, loadBackground, fakeFetch } = require('./fake_chrome.js');
 
 async function testStampWithoutEditorFallsBackToLocal() {
+  // 時計を固定し、Twitch の時計を 3 秒進んでいることにする
+  // Freeze the clock and make Twitch's clock 3 s ahead.
+  const pressedAt = Date.parse('2026-10-30T10:10:05Z');
+  const serverDate = new Date(pressedAt + 3000).toUTCString();
   const fc = createFakeChrome({
     settings: { clientId: 'cid', lagSec: 5 },
     auth: { token: 'tok', login: 'mod1', userId: '1' },
@@ -18,18 +22,20 @@ async function testStampWithoutEditorFallsBackToLocal() {
     { match: (u) => u === 'https://api.twitch.tv/helix/streams/markers',
       respond: () => ({ status: 403, body: { error: 'Forbidden', message: 'not an editor' } }) },
     { match: (u) => u.startsWith('https://api.twitch.tv/helix/streams?'),
-      respond: () => ({ status: 200, body: { data: [{ id: '999', type: 'live', started_at: '2026-10-30T10:00:00Z', user_id: '55' }] } }) }
+      respond: () => ({ status: 200, headers: { Date: serverDate }, body: { data: [{ id: '999', type: 'live', started_at: '2026-10-30T10:00:00Z', user_id: '55' }] } }) }
   ]);
   const bg = loadBackground(fc, fetchImpl);
   assert.strictEqual(typeof fc.calls.messageHandler, 'function');
 
   // content.js が送る形 / The shape content.js sends
-  const res = await bg.handleMessage({
-    type: 'stamp',
-    url: 'https://www.twitch.tv/terano_naa',
-    memo: 'm',
-    pressedAt: Date.parse('2026-10-30T10:10:05Z')
-  });
+  const realNow = Date.now;
+  Date.now = () => pressedAt;
+  let res;
+  try {
+    res = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: 'm', pressedAt: pressedAt });
+  } finally {
+    Date.now = realNow;
+  }
   assert.strictEqual(res.native, false);
   assert.strictEqual(res.warning, '');
 
@@ -41,9 +47,9 @@ async function testStampWithoutEditorFallsBackToLocal() {
   assert.strictEqual(record.channel, 'terano_naa');
   assert.strictEqual(record.memo, 'm');
   assert.strictEqual(record.native, false);
-  // 605 秒 - 遅延 5 秒。Date ヘッダが秒単位なので時計ずれで 1 秒ぶれる
-  // 605 s minus 5 s lag; the second-resolution Date header can shift it by 1 s.
-  assert.ok(record.offset_sec === 600 || record.offset_sec === 599, 'offset_sec=' + record.offset_sec);
+  // 605 秒 + 時計ずれ 3 秒 - 遅延 5 秒 / 605 s + 3 s clock skew - 5 s lag
+  assert.strictEqual(record.clock_skew_ms, 3000);
+  assert.strictEqual(record.offset_sec, 603);
   assert.deepStrictEqual(fc.storage.records, state.records);
 
   // validate → streams → markers の順に呼ぶ（stream に user_id があるので users は呼ばない）
