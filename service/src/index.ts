@@ -30,9 +30,10 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     if (path.startsWith('/api/') || path.startsWith('/auth/')) return handleRoute(request, env, url);
-    // 共有ページ /s/<id> と /s/<id>/comments / Shared pages /s/<id> and /s/<id>/comments
-    if (/^\/s\/[^/]+\/?$/.test(path)) return env.ASSETS.fetch(new Request(url.origin + '/s.html', request));
-    if (/^\/s\/[^/]+\/comments\/?$/.test(path)) return env.ASSETS.fetch(new Request(url.origin + '/comments.html', request));
+    // 共有ページ /s/<id> と /s/<id>/comments。拡張子なしで引く（.html だと 307 で /s へ飛ばされ ID が消える）
+    // Shared pages /s/<id> and /s/<id>/comments. Fetch without the extension (.html would 307 to /s and drop the id)
+    if (/^\/s\/[^/]+\/?$/.test(path)) return env.ASSETS.fetch(new Request(url.origin + '/s', request));
+    if (/^\/s\/[^/]+\/comments\/?$/.test(path)) return env.ASSETS.fetch(new Request(url.origin + '/comments', request));
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
