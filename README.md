@@ -52,6 +52,8 @@ Setup:
 1. Keep the Client ID as prefilled (the Worker accepts only tokens issued for its own Twitch application) and keep the Redirect URL registered as in [Setup](#setup); nothing changes there.
 2. Enter the server origin in "サーバー URL / Server URL", for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` is accepted (no path, query, or fragment).
 3. Click "このサーバーへの送信を許可 / Allow sending to this server" and accept Chrome's prompt. The extension declares the server only as an optional host permission, so Chrome blocks requests to it until you grant it for that origin. Once granted, the popup syncs immediately.
+
+Saving a different server URL queues every local record (tombstones included) for the new server and forgets which records the previous server had received or rejected.
 4. Make sure you are logged in. The Worker checks the Twitch token and accepts stamps only for channels where your Twitch login is a member (`/admin`).
 
 Behavior:
@@ -59,7 +61,7 @@ Behavior:
 - Stamping, editing a memo, importing a CSV, and deleting an individual record each queue the affected record and upload it right away with `POST /api/stamps`. A deleted record is sent as a tombstone (`deleted: true`); the server accepts tombstones only for your own records.
 - "配信ごとの削除" (the stream-level "削除" button) is local only. It removes the stream's records from this browser and from the upload queue and sends nothing, so the stream stays on the server.
 - Records that could not be sent (offline, server error, expired login) stay in the queue. The extension retries the queue every five minutes and after the next login. "サーバーと同期 / Sync with server" queues every local record, tombstones included, and sends them now.
-- The popup shows "未送信 n 件 / pending n", "最終同期 HH:mm（成功 n）/ last sync" with the number of accepted records, and, per record, "送信済 / sent", "未送信 / pending", or "失敗 / failed" next to "ネイティブ" / "ローカル".
+- The popup shows "未送信 n 件 / pending n", "最終同期 HH:mm（成功 n）/ last sync" with the number of accepted records, and, per record, a mark next to "ネイティブ" / "ローカル": "送信済 / sent" (the current server accepted it), "未送信 / pending" (queued), "失敗 / failed" (rejected), or "未送信 / unsent" (never sent to the current server, for example after "失敗一覧を消す"; "サーバーと同期" sends it).
 - A record the server reports as `stale` is already stored there in the same or a newer version. It counts as sent and is not retried.
 
 Reading failures:
@@ -69,8 +71,10 @@ Reading failures:
   - "このチャンネルの会員ではありません / not a member of this channel" (`forbidden_channel`): ask a channel owner to add your Twitch login in `/admin`.
   - "記録の形式が不正です / invalid record" (`invalid_*`), "時刻が不正です / invalid time" (`invalid_time`), "配信情報がありません / stream missing" (`missing_stream`): the record itself is broken, typically from an edited CSV.
 - Errors that stop the whole upload are shown under the last sync line, and the records stay pending:
-  - "サーバーに届きませんでした (http_404) / server unreachable (http_404)" or another `http_<status>`: usually a wrong server URL.
-  - "通信できませんでした / network error": offline or the server is down; the five-minute retry sends them later.
+  - "サーバーが要求を拒否しました (http_404) / server rejected the request (http_404)" or another 4xx status: usually a wrong server URL.
+  - "サーバーが一時的に応答しません / server temporarily unavailable" (5xx, 408, 429) or "通信できませんでした / network error" (offline): the five-minute retry sends them later.
+  - A code the server names itself, such as `twitch_unavailable` (Twitch is down) or `csrf`, is shown as is.
+  - "拡張の内部エラー / extension internal error": an unexpected error inside the extension; reload it from `chrome://extensions`.
   - "サーバーへの送信が許可されていません / sending not allowed yet": grant the host permission (step 3).
   - "ログインが必要です / login required": log in again (see below).
 - Twitch login tokens from the implicit grant expire after about four hours. When the server answers 401, or when the extension finds the token expired while stamping, the popup shows "トークンが切れました。再ログインしてください / Token expired. Log in again". Click "ログイン"; the queued records are sent after the login. Stamps keep being saved locally in the meantime.

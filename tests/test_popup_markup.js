@@ -23,6 +23,11 @@ assert.ok(/<details id="failed-details"/.test(html));
 // 新しいメッセージを background に送る / Sends the new messages to the background
 for (const type of ['syncNow', 'clearFailed']) assert.ok(script.indexOf("type: '" + type + "'") >= 0, 'popup.js does not send ' + type);
 for (const name of ['TSLib.reasonText', 'TSLib.recordSyncState']) assert.ok(script.indexOf(name) >= 0, 'popup.js does not use ' + name);
+// 4 つの送信状態すべてに印がある / Every one of the four sync states has a mark
+for (const mark of ["sent: '送信済 / sent'", "pending: '未送信 / pending'", "failed: '失敗 / failed'", "unsent: '未送信 / unsent'"]) {
+  assert.ok(script.indexOf(mark) >= 0, 'popup.js is missing the mark ' + mark);
+}
+assert.ok(script.indexOf('currentState.synced') >= 0, 'popup.js does not pass synced to recordSyncState');
 // データを HTML として流し込まない / Never inject data as HTML
 assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML/.test(script), 'popup.js must not use innerHTML');
 

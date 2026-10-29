@@ -342,6 +342,66 @@ async function testClearFailed() {
   await bg.handleMessage({ type: 'clearFailed' });
   assert.deepStrictEqual(fc.storage.failed, []);
   assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+  // 消した失敗は送信済にならない / A cleared failure does not become sent
+  assert.deepStrictEqual((await bg.readState()).synced, []);
+}
+
+// サーバー URL を設定する前からある記録は送信待ちになり、200 で synced に入る
+// A record that existed before the server URL was set becomes pending, and enters synced after a 200.
+async function testServerUrlSetQueuesExistingRecords() {
+  const fc = syncChrome({ records: [makeRecord('y0000001'), makeRecord('y0000002', '999', { deleted: true, offset_sec: 20 })] }, { serverUrl: '' });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: (u, init) => ({ status: 200, body: { accepted: ['y0000001'], rejected: [{ id: 'y0000002', reason: 'stale' }] } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  let state = await bg.handleMessage({ type: 'getState' });
+  assert.deepStrictEqual(state.synced, []);
+  await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: PROD_ORIGIN } });
+  // 保存直後の送信を待つ / Wait for the upload started by the save
+  await bg.uploadPending();
+  assert.strictEqual(stampsCalls(fetchImpl).length, 1);
+  assert.deepStrictEqual(JSON.parse(stampsCalls(fetchImpl)[0].init.body).records.map((r) => r.id).sort(), ['y0000001', 'y0000002']);
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.deepStrictEqual(state.pending, []);
+  assert.deepStrictEqual(state.synced.slice().sort(), ['y0000001', 'y0000002']);
+}
+
+// 送信済になった id は failed から外れる / Ids that became sent leave failed
+async function testAcceptedGoesToSyncedAndLeavesFailed() {
+  const fc = syncChrome({
+    records: [makeRecord('y0000001')], pending: ['y0000001'],
+    failed: [{ id: 'y0000001', reason: 'invalid_record', at: '2026-10-30T09:00:00Z' }], synced: ['y0000009']
+  });
+  const bg = loadBackground(fc, fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]));
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.synced, ['y0000009', 'y0000001']);
+  assert.deepStrictEqual(fc.storage.failed, []);
+}
+
+// サーバー URL を変えたら synced / failed を空にし、全記録（墓標を含む）を送信待ちにする
+// Changing the server URL empties synced / failed and queues every record, tombstones included.
+async function testServerUrlChangeResetsQueue() {
+  const other = 'https://other.example';
+  const fc = syncChrome({
+    records: [makeRecord('y0000001'), makeRecord('y0000002', '888', { deleted: true })],
+    pending: [], synced: ['y0000001', 'y0000002'],
+    failed: [{ id: 'y0000002', reason: 'forbidden_tombstone', at: '2026-10-30T09:00:00Z' }]
+  });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  // URL が同じなら何も変えない / The same URL changes nothing
+  await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 3, serverUrl: PROD_ORIGIN + '/' } });
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.synced, ['y0000001', 'y0000002']);
+  assert.strictEqual(fc.storage.failed.length, 1);
+  assert.deepStrictEqual(fc.storage.pending, []);
+  // 権限の無い別サーバーへ変える（送れないので pending に残る） / Switch to another server without permission (stays pending)
+  await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 3, serverUrl: other } });
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.synced, []);
+  assert.deepStrictEqual(fc.storage.failed, []);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), ['y0000001', 'y0000002']);
+  assert.strictEqual(stampsCalls(fetchImpl).length, 0);
+  assert.strictEqual(fc.storage.lastSync.error, 'permission_required');
 }
 
 async function testServerErrorKeepsPending() {
@@ -350,9 +410,23 @@ async function testServerErrorKeepsPending() {
     respond: () => ({ status: 503, body: { error: 'twitch_unavailable' } }) }]);
   const bg = loadBackground(fc, fetchImpl);
   const summary = await bg.uploadPending();
-  assert.strictEqual(summary.error, '503');
+  assert.strictEqual(summary.error, 'twitch_unavailable');
+  assert.strictEqual(fc.storage.lastSync.error, 'twitch_unavailable');
   assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
   assert.deepStrictEqual((await bg.readState()).failed, []);
+}
+
+// JSON の無い再送対象（502 / 429）は http_<status>（数字だけにしない）
+// A retryable answer without JSON (502 / 429) gives http_<status>, never the bare number.
+async function testRetryableWithoutBodyIsHttpCode() {
+  for (const status of [502, 429]) {
+    const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+    const bg = loadBackground(fc, fakeFetch([{ match: (u) => u === STAMPS_URL, respond: () => ({ status: status, body: null }) }]));
+    const summary = await bg.uploadPending();
+    assert.strictEqual(summary.error, 'http_' + status);
+    assert.strictEqual(fc.storage.lastSync.error, 'http_' + status);
+    assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+  }
 }
 
 async function testLargeQueueIsSplitInto500() {
@@ -537,6 +611,10 @@ async function testDeleteStreamIsLocalOnly() {
   await testUnauthorizedWithReplacedTokenKeepsAuth();
   await testClearFailed();
   await testServerErrorKeepsPending();
+  await testRetryableWithoutBodyIsHttpCode();
+  await testServerUrlSetQueuesExistingRecords();
+  await testAcceptedGoesToSyncedAndLeavesFailed();
+  await testServerUrlChangeResetsQueue();
   await testLargeQueueIsSplitInto500();
   await testNoServerUrlSendsNothing();
   await testSyncNowSendsEveryRecord();

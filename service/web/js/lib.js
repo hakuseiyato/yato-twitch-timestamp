@@ -471,23 +471,29 @@ const TSLib = (function () {
     permission_required: 'サーバーへの送信が許可されていません / sending not allowed yet',
     unauthorized: 'ログインが必要です / login required',
     login_required: 'ログインが必要です / login required',
-    network: '通信できませんでした / network error'
+    network: '通信できませんでした / network error',
+    internal: '拡張の内部エラー / extension internal error'
   };
 
   function reasonText(code) {
     const text = code === undefined || code === null ? '' : String(code);
     if (Object.prototype.hasOwnProperty.call(REASON_TEXT, text)) return REASON_TEXT[text];
     if (/^invalid_/.test(text)) return '記録の形式が不正です / invalid record';
+    // 5xx / 408 / 429 は一時的、それ以外の 4xx は拒否、残りは届かない
+    // 5xx / 408 / 429 are temporary, other 4xx are rejections, anything else did not arrive.
+    if (/^http_(5\d\d|408|429)$/.test(text)) return 'サーバーが一時的に応答しません / server temporarily unavailable';
+    if (/^http_4\d\d$/.test(text)) return 'サーバーが要求を拒否しました (' + text + ') / server rejected the request (' + text + ')';
     if (/^http_\d+$/.test(text)) return 'サーバーに届きませんでした (' + text + ') / server unreachable (' + text + ')';
     return text;
   }
 
-  // 記録の送信状態。送り直し待ちは失敗より優先する（失敗後に直された記録）
-  // A record's sync state; waiting to resend wins over an older failure (a record edited after it failed).
-  function recordSyncState(id, pendingIds, failed) {
-    if ((pendingIds || []).indexOf(id) >= 0) return 'pending';
+  // 記録の送信状態: 失敗 > 送信待ち > 送信済（今のサーバーが受け取った） > 一度も送っていない
+  // A record's sync state: failed > pending > sent (the current server took it) > never sent.
+  function recordSyncState(id, pendingIds, failed, syncedIds) {
     if ((failed || []).some(function (entry) { return entry && entry.id === id; })) return 'failed';
-    return 'sent';
+    if ((pendingIds || []).indexOf(id) >= 0) return 'pending';
+    if ((syncedIds || []).indexOf(id) >= 0) return 'sent';
+    return 'unsent';
   }
 
   // 再送で直る見込みがある応答か（0 = ネットワーク例外 / 408 / 429 / 5xx）

@@ -139,5 +139,5 @@ button.danger:hover { background: #9c2f20; }
 .mono { font-family: ui-monospace, Consolas, monospace; color: #adadb8; }
 
 .badge.sent { background: #234a6b; }
-.badge.pending { background: #6b5a1f; }
+.badge.pending, .badge.unsent { background: #6b5a1f; }
 .badge.failed { background: #7a271a; }

@@ -265,19 +265,30 @@ assert.strictEqual(TSLib.reasonText('permission_required'), 'サーバーへの�
 assert.strictEqual(TSLib.reasonText('unauthorized'), 'ログインが必要です / login required');
 assert.strictEqual(TSLib.reasonText('login_required'), 'ログインが必要です / login required');
 assert.strictEqual(TSLib.reasonText('network'), '通信できませんでした / network error');
-assert.strictEqual(TSLib.reasonText('http_404'), 'サーバーに届きませんでした (http_404) / server unreachable (http_404)');
-assert.strictEqual(TSLib.reasonText('http_405'), 'サーバーに届きませんでした (http_405) / server unreachable (http_405)');
+// 一時的な不調（5xx / 408 / 429）と、それ以外の 4xx / Temporary trouble (5xx / 408 / 429) and other 4xx
+for (const code of ['http_500', 'http_502', 'http_503', 'http_599', 'http_408', 'http_429']) {
+  assert.strictEqual(TSLib.reasonText(code), 'サーバーが一時的に応答しません / server temporarily unavailable', code);
+}
+for (const code of ['http_400', 'http_403', 'http_404', 'http_405', 'http_413']) {
+  assert.strictEqual(TSLib.reasonText(code), 'サーバーが要求を拒否しました (' + code + ') / server rejected the request (' + code + ')', code);
+}
+assert.strictEqual(TSLib.reasonText('http_302'), 'サーバーに届きませんでした (http_302) / server unreachable (http_302)');
+assert.strictEqual(TSLib.reasonText('internal'), '拡張の内部エラー / extension internal error');
 assert.strictEqual(TSLib.reasonText('csrf'), 'csrf');
 assert.strictEqual(TSLib.reasonText('http_x'), 'http_x');
 assert.strictEqual(TSLib.reasonText(''), '');
 assert.strictEqual(TSLib.reasonText(undefined), '');
+// 失敗 > 送信待ち > 送信済（synced にある） > 一度も送っていない / failed > pending > sent (in synced) > never sent
 const syncFailed = [{ id: 'f1', reason: 'forbidden_channel', at: 'x' }, { id: 'both', reason: 'invalid_record', at: 'x' }];
-assert.strictEqual(TSLib.recordSyncState('p1', ['p1', 'both'], syncFailed), 'pending');
-assert.strictEqual(TSLib.recordSyncState('f1', ['p1', 'both'], syncFailed), 'failed');
-assert.strictEqual(TSLib.recordSyncState('s1', ['p1', 'both'], syncFailed), 'sent');
-// 失敗後に直されて送り直し待ちなら未送信 / Edited after a failure and waiting to resend: pending
-assert.strictEqual(TSLib.recordSyncState('both', ['p1', 'both'], syncFailed), 'pending');
-assert.strictEqual(TSLib.recordSyncState('s1', undefined, undefined), 'sent');
+const syncPending = ['p1', 'both', 'ps'];
+const syncDone = ['s1', 'ps', 'f1'];
+assert.strictEqual(TSLib.recordSyncState('p1', syncPending, syncFailed, syncDone), 'pending');
+assert.strictEqual(TSLib.recordSyncState('f1', syncPending, syncFailed, syncDone), 'failed');
+assert.strictEqual(TSLib.recordSyncState('both', syncPending, syncFailed, syncDone), 'failed');
+assert.strictEqual(TSLib.recordSyncState('ps', syncPending, syncFailed, syncDone), 'pending');
+assert.strictEqual(TSLib.recordSyncState('s1', syncPending, syncFailed, syncDone), 'sent');
+assert.strictEqual(TSLib.recordSyncState('u1', syncPending, syncFailed, syncDone), 'unsent');
+assert.strictEqual(TSLib.recordSyncState('u1', undefined, undefined, undefined), 'unsent');
 const u = TSLib.toUploadRecord({ id: 'y1', offset_sec: 61.2345, native: 'true', deleted: 0, created_at: '2026-01-01T00:00:00.000Z', by: 'x', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' });
 assert.strictEqual(u.timecode, '00:01:01'); assert.strictEqual(u.offset_sec, 61.235); assert.strictEqual(u.native, true); assert.strictEqual(u.deleted, false); assert.strictEqual(u.updated_at, u.created_at); assert.strictEqual(u.clock_skew_ms, 0);
 assert.deepStrictEqual(Object.keys(u), ['id', 'timecode', 'offset_sec', 'by', 'memo', 'native', 'channel', 'stream_id', 'started_at', 'created_at', 'updated_at', 'deleted', 'clock_skew_ms']);

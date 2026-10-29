@@ -28,7 +28,8 @@
   const SYNC_MARKS = {
     sent: '送信済 / sent',
     pending: '未送信 / pending',
-    failed: '失敗 / failed'
+    failed: '失敗 / failed',
+    unsent: '未送信 / unsent'
   };
   let currentState = null;
 
@@ -118,7 +119,7 @@
         append(row, 'span', record.native ? 'ネイティブ' : 'ローカル', record.native ? 'badge native' : 'badge local');
         // サーバー URL があるときだけ送信状態を出す / Show the sync state only when a server URL is set
         if (currentState.settings.serverUrl) {
-          const syncState = TSLib.recordSyncState(record.id, currentState.pending, currentState.failed);
+          const syncState = TSLib.recordSyncState(record.id, currentState.pending, currentState.failed, currentState.synced);
           append(row, 'span', SYNC_MARKS[syncState], 'badge ' + syncState);
         }
         actionButton(row, '削除', async function () {

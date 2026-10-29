@@ -39,7 +39,7 @@ async function hasHostPermission(serverUrl) {
 }
 
 async function readState() {
-  const stored = await chrome.storage.local.get(['settings', 'auth', 'records', 'pending', 'failed', 'lastSync']);
+  const stored = await chrome.storage.local.get(['settings', 'auth', 'records', 'pending', 'failed', 'synced', 'lastSync']);
   const settings = Object.assign({}, DEFAULT_SETTINGS, stored.settings || {});
   // 空欄の Client ID は既定値 / An empty Client ID falls back to the default
   if (!settings.clientId) settings.clientId = DEFAULT_SETTINGS.clientId;
@@ -50,6 +50,8 @@ async function readState() {
     // 送信待ちの id・送れなかった記録・最後の送信結果 / Ids waiting to upload, failed uploads, last upload result
     pending: Array.isArray(stored.pending) ? stored.pending : [],
     failed: Array.isArray(stored.failed) ? stored.failed : [],
+    // 今のサーバーが accepted / stale で受け取った id / Ids the current server answered accepted / stale
+    synced: Array.isArray(stored.synced) ? stored.synced : [],
     lastSync: stored.lastSync || null
   };
 }
@@ -165,7 +167,8 @@ async function uploadBatch(serverUrl, token, batch, summary) {
       }).map(function (record) { return record.id; });
       const pending = result.pendingIds.concat(edited.filter(function (id) { return result.pendingIds.indexOf(id) < 0; }));
       const failed = result.failed.filter(function (entry) { return !succeeded.has(entry.id); });
-      await chrome.storage.local.set({ pending: pending, failed: failed });
+      const synced = current.synced.concat(Array.from(succeeded).filter(function (id) { return current.synced.indexOf(id) < 0; }));
+      await chrome.storage.local.set({ pending: pending, failed: failed, synced: synced });
     });
     return false;
   }
@@ -183,7 +186,8 @@ async function uploadBatch(serverUrl, token, batch, summary) {
   }
 
   if (TSLib.isRetryableUpload(response.status)) {
-    summary.error = String(response.status);
+    // サーバーの error コード、無ければ http_<status> / The server's error code, else http_<status>
+    summary.error = typeof body.error === 'string' && body.error ? body.error : 'http_' + response.status;
     return true;
   }
 
@@ -464,11 +468,22 @@ async function handleMessage(message) {
       };
       if (!Number.isFinite(nextSettings.lagSec) || nextSettings.lagSec < 0) throw new Error('遅延（秒）には 0 以上の数値を入力してください');
       const reloginRequired = nextSettings.clientId !== state.settings.clientId;
-      await serializedStorage(function () {
+      const serverChanged = await serializedStorage(async function () {
+        const current = await readState();
         const changes = { settings: nextSettings };
         if (reloginRequired) changes.auth = { token: '', login: '', userId: '' };
-        return chrome.storage.local.set(changes);
+        // サーバーが変わったら送信済・失敗を捨て、全記録（墓標を含む）を送り直す
+        // A different server: drop sent / failed and queue every record again, tombstones included.
+        const changed = nextSettings.serverUrl !== current.settings.serverUrl;
+        if (changed) {
+          changes.synced = [];
+          changes.failed = [];
+          changes.pending = TSLib.mergeRecords(current.records).map(function (record) { return record.id; });
+        }
+        await chrome.storage.local.set(changes);
+        return changed;
       });
+      if (serverChanged) kickUpload();
       return { settings: nextSettings, reloginRequired: reloginRequired };
     }
     case 'importRecords': {
@@ -520,7 +535,8 @@ async function handleMessage(message) {
         await chrome.storage.local.set({
           records: all.filter(function (record) { return !removed.has(record.id); }),
           pending: state.pending.filter(function (id) { return !removed.has(id); }),
-          failed: state.failed.filter(function (entry) { return !removed.has(entry.id); })
+          failed: state.failed.filter(function (entry) { return !removed.has(entry.id); }),
+          synced: state.synced.filter(function (id) { return !removed.has(id); })
         });
         return {};
       });
