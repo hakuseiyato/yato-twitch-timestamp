@@ -7,7 +7,7 @@ describe('shared pages', () => {
   it('GET /s/<id> serves s.html', async () => {
     const res = await request('/s/abc', { redirect: 'manual' });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('Stream page (placeholder)');
+    expect(await res.text()).toContain('src="/js/stream.js"');
   });
 
   it('GET /s/<id>/comments serves comments.html', async () => {

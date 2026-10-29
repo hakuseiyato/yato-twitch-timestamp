@@ -6,6 +6,7 @@ const assert = require('assert');
 const Bins = require('../service/web/js/bins.js');
 const Chat = require('../service/web/js/chat-fetch.js');
 const Api = require('../service/web/js/api.js');
+const Graph = require('../service/web/js/graph.js');
 const page = require('../service/test/fixtures/gql_comments_page.json');
 
 // ビン分け / Binning
@@ -63,5 +64,19 @@ assert.ok(!Number.isNaN(Date.parse(j.fetched_at)));
 assert.strictEqual(Api.formatDate(new Date(2026, 9, 29, 9, 5).toISOString()), '2026-10-29 09:05');
 assert.strictEqual(Api.formatDate(''), '—');
 assert.strictEqual(Api.formatDate(null), '—');
+
+// コメント時刻の補正と探索 / Comment time shift and lookup
+assert.deepStrictEqual(Array.from(Bins.shiftTimes([[10, 'a', 'A', 'x'], [2, 'b', 'B', 'y'], ['bad', 'c', 'C', 'z']], 1, 5)), [6, 0, 0]);
+assert.deepStrictEqual(Array.from(Bins.shiftTimes([[10.5, 'a', 'A', 'x']], 0, 0)), [10.5]);
+assert.strictEqual(Bins.firstAtOrAfter(Float64Array.from([0, 5, 5, 9]), 5), 1);
+assert.strictEqual(Bins.firstAtOrAfter(Float64Array.from([0, 5, 5, 9]), 6), 3);
+assert.strictEqual(Bins.firstAtOrAfter(Float64Array.from([0, 5, 5, 9]), 10), 4);
+assert.strictEqual(Bins.firstAtOrAfter(Float64Array.from([]), 0), 0);
+
+// グラフの目盛り間隔（ビン数）/ Graph label step (in bins)
+assert.strictEqual(Graph.labelStep(30, 4), 20);
+assert.strictEqual(Graph.labelStep(60, 10), 10);
+assert.strictEqual(Graph.labelStep(120, 100), 1);
+assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 
 console.log('all tests passed');

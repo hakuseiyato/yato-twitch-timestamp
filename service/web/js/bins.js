@@ -29,7 +29,30 @@ const YTSBins = (function () {
     return order.slice(0, Math.max(0, n)).sort((a, b) => a - b);
   }
 
+  // コメント [offset, login, display, text] の表示時刻 = offset + vodOffsetSec - chatLagSec（負は 0、非数の offset は 0 扱い）
+  // Shown time of each comment [offset, login, display, text] = offset + vodOffsetSec - chatLagSec (negative gives 0, a non-numeric offset counts as 0).
+  function shiftTimes(comments, vodOffsetSec, chatLagSec) {
+    const shift = (Number(vodOffsetSec) || 0) - (Number(chatLagSec) || 0);
+    const times = new Float64Array(comments.length);
+    for (let i = 0; i < comments.length; i++) times[i] = Math.max(0, (Number(comments[i][0]) || 0) + shift);
+    return times;
+  }
+
+  // 昇順の times で sec 以上の最初の index（無ければ length）/ First index in ascending times with a value >= sec (length when none)
+  function firstAtOrAfter(times, sec) {
+    let lo = 0;
+    let hi = times.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid] < sec) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
   return {
+    shiftTimes: shiftTimes,
+    firstAtOrAfter: firstAtOrAfter,
     binIndex: binIndex,
     binCounts: binCounts,
     peakBins: peakBins

@@ -21,6 +21,9 @@
   --warning: #e0b050;
   --highlight: #2d8ceb22;
   --shadow: #0008;
+  /* グラフの棒（#2b2b2b 上で 3:1 以上）/ Graph bars (3:1 or more on #2b2b2b) */
+  --graph-bar: #6a819a;
+  --graph-bar-hover: #93a9c1;
   /* 字体 / Fonts */
   --font-body: system-ui, "Segoe UI", "Yu Gothic UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -203,6 +206,83 @@ td.actions { width: 1%; white-space: nowrap; text-align: right; }
 /* ---- 403 などの案内 / Notices such as 403 ---- */
 .notice { padding: var(--space-xl) var(--space-lg); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); color: var(--secondary); text-align: center; }
 .notice strong { display: block; margin-bottom: var(--space-sm); color: var(--text); font-size: var(--text-lg); }
+
+/* ---- 配信ページ / Stream page ---- */
+main.wide { max-width: 1280px; }
+.chat-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
+.chat-state .chat-none { color: var(--warning); font-weight: 600; }
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--field);
+}
+.import-panel select { width: 100%; }
+#import-progress { align-items: center; }
+#import-progress .status { font-variant-numeric: tabular-nums; }
+
+.graph-wrap { position: relative; height: 180px; }
+.graph-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  background: var(--field);
+  cursor: pointer;
+}
+.graph-tooltip {
+  position: absolute;
+  top: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 2px 8px var(--shadow);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#page-error:empty { min-height: 0; }
+.selection-row { align-items: center; }
+#selection-label { font-variant-numeric: tabular-nums; }
+
+/* タブ / Tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: var(--space-xs); border-bottom: 1px solid var(--border); }
+.tabs [role="tab"] {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--secondary);
+}
+.tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
+
+/* コメント・スタンプの行 / Comment and stamp rows */
+.list-scroll { position: relative; max-height: 60vh; overflow-y: auto; }
+.row-list { margin: 0; padding: 0; list-style: none; }
+.row-list li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 160px) minmax(0, 1fr);
+  gap: var(--space-md);
+  padding: var(--space-xs) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+.row-time { color: var(--secondary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.row-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.row-text { overflow-wrap: anywhere; }
+.row-list li.in-bin { border-left-color: var(--accent); background: var(--highlight); }
+.row-list li.flash { border-left-color: var(--warning); background: var(--highlight); }
+
+@media (max-width: 640px) {
+  .graph-wrap { height: 140px; }
+  .row-list li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 var(--space-sm); }
+  .row-text { grid-column: 1 / -1; }
+}
 
 @media (max-width: 640px) {
   main { padding: var(--space-lg) var(--space-lg) var(--space-xl); }

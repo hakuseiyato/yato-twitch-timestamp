@@ -24,16 +24,22 @@ const YTSApi = (function () {
     twitch_unavailable: 'Twitch に接続できません。少し待って再試行してください / Twitch is unavailable, try again shortly',
     invalid_label: 'ラベルが長すぎます / Label is too long',
     payload_too_large: 'データが大きすぎます / Payload too large',
+    too_many_records: '件数が多すぎます / Too many records',
     internal: 'サーバーエラー / Server error'
   };
 
   // Worker の API を呼ぶ。非 2xx と通信失敗は {status, error, detail} を throw
+  // rawBody は JSON 文字列をそのまま送る（大きなチャット JSON を二重に文字列化しない）
   // Calls the Worker API. Non-2xx and network failures throw {status, error, detail}.
+  // rawBody sends a JSON string as-is (so a large chat JSON is not stringified twice).
   async function api(path, options) {
     const opts = options || {};
     const headers = { 'X-Requested-With': 'yts' };
     const init = { method: opts.method || 'GET', credentials: 'same-origin', headers: headers };
-    if (opts.body !== undefined) {
+    if (opts.rawBody !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = opts.rawBody;
+    } else if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(opts.body);
     }

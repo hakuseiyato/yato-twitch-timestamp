@@ -103,14 +103,15 @@ const YTSChat = (function () {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // GraphQL へ POST。429 / 5xx は 1 秒待って 3 回まで再試行する
-  // POST to GraphQL; 429 / 5xx are retried up to 3 times after a 1 s wait.
-  async function postGql(body) {
+  // GraphQL へ POST。429 / 5xx は 1 秒待って 3 回まで再試行する。signal で中止できる
+  // POST to GraphQL; 429 / 5xx are retried up to 3 times after a 1 s wait. Abortable via signal.
+  async function postGql(body, signal) {
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(GQL_URL, {
         method: 'POST',
         headers: { 'Client-ID': GQL_CLIENT_ID, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: signal
       });
       if (res.ok) return res.json();
       const retryable = res.status === 429 || res.status >= 500;
@@ -139,16 +140,20 @@ const YTSChat = (function () {
   }
 
   // VOD のチャットを先頭から hasNextPage が偽になるまで逐次取得する。onProgress(取得件数) をページごとに呼ぶ
+  // options.signal（AbortSignal）が中止されると AbortError で止まる
   // Fetches a VOD's chat sequentially from the start until hasNextPage is false; calls onProgress(count) after each page.
-  async function fetchVodChat(vodId, onProgress) {
+  // Stops with an AbortError once options.signal (an AbortSignal) is aborted.
+  async function fetchVodChat(vodId, onProgress, options) {
+    const signal = options && options.signal;
     const all = [];
     let variables = { videoID: String(vodId), contentOffsetSeconds: 0 };
     for (;;) {
+      if (signal && signal.aborted) throw new DOMException('中止しました / Aborted', 'AbortError');
       const page = await postGql([{
         operationName: 'VideoCommentsByOffsetOrCursor',
         variables: variables,
         extensions: { persistedQuery: { version: 1, sha256Hash: COMMENTS_HASH } }
-      }]);
+      }], signal);
       const parsed = parseCommentsPage(page);
       for (const row of parsed.comments) all.push(row);
       if (onProgress) onProgress(all.length);
