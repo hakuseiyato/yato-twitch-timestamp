@@ -71,9 +71,65 @@ async function testUnmockedFetchIsReported() {
   assert.strictEqual(fetchImpl.calls.length, 1);
 }
 
+const DEFAULT_CLIENT_ID = '105fdov1w7trd0swseu50l5qy2sckg';
+const PROD_ORIGIN = 'https://yato-twitch-timestamp.hakuseiyato.workers.dev';
+
+async function testSaveSettingsServerUrl() {
+  const fc = createFakeChrome({ settings: { clientId: 'cid', lagSec: 5 }, auth: { token: 'tok', login: 'mod1', userId: '1' }, records: [] });
+  const bg = loadBackground(fc, fakeFetch([]));
+  // 既定値 / Defaults
+  let state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.settings.serverUrl, '');
+  assert.strictEqual(state.serverPermission, false);
+
+  // https 以外・パス付きは拒否 / Non-https and URLs with a path are rejected
+  const urlError = { message: 'サーバー URL は https://ホスト名 の形で入力してください / Server URL must be https://host' };
+  for (const bad of ['http://x', 'https://h/path', 'not a url', 'https://h/?q=1', 'https://h/#x']) {
+    await assert.rejects(bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: bad } }), urlError, bad);
+  }
+  assert.strictEqual(fc.storage.settings.serverUrl, undefined);
+
+  // 末尾の / を落として origin で保存 / Stored as the origin without the trailing slash
+  const saved = await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: '  ' + PROD_ORIGIN + '/  ' } });
+  assert.strictEqual(saved.settings.serverUrl, PROD_ORIGIN);
+  assert.strictEqual(fc.storage.settings.serverUrl, PROD_ORIGIN);
+  assert.strictEqual(saved.reloginRequired, false);
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.settings.serverUrl, PROD_ORIGIN);
+
+  // 権限は偽 chrome.permissions の中身に従う / The permission follows the fake chrome.permissions contents
+  assert.strictEqual(state.serverPermission, false);
+  assert.strictEqual(await bg.hasHostPermission(PROD_ORIGIN), false);
+  fc.calls.permissions.add(PROD_ORIGIN + '/*');
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.serverPermission, true);
+  assert.strictEqual(await bg.hasHostPermission(PROD_ORIGIN), true);
+  assert.strictEqual(await bg.hasHostPermission(''), false);
+
+  // 空欄は未設定に戻す / An empty value clears the setting
+  const cleared = await bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: '' } });
+  assert.strictEqual(cleared.settings.serverUrl, '');
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.serverPermission, false);
+}
+
+async function testSaveSettingsEmptyClientIdUsesDefault() {
+  const fc = createFakeChrome({});
+  const bg = loadBackground(fc, fakeFetch([]));
+  let state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.settings.clientId, DEFAULT_CLIENT_ID);
+  const saved = await bg.handleMessage({ type: 'saveSettings', settings: { clientId: '  ', lagSec: 3 } });
+  assert.strictEqual(saved.settings.clientId, DEFAULT_CLIENT_ID);
+  assert.strictEqual(fc.storage.settings.clientId, DEFAULT_CLIENT_ID);
+  assert.strictEqual(fc.storage.settings.lagSec, 3);
+  assert.strictEqual(fc.storage.settings.serverUrl, '');
+}
+
 (async () => {
   await testStampWithoutEditorFallsBackToLocal();
   await testUnmockedFetchIsReported();
+  await testSaveSettingsServerUrl();
+  await testSaveSettingsEmptyClientIdUsesDefault();
   console.log('all tests passed');
 })().catch((error) => {
   console.error(error);

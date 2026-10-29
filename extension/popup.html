@@ -21,6 +21,8 @@
     <div class="number-row">
       <label>遅延（秒）<input id="lag-sec" type="number" min="0" step="0.1"></label>
     </div>
+    <label>サーバー URL / Server URL<input id="server-url" type="url" autocomplete="off" placeholder="https://yato-twitch-timestamp.hakuseiyato.workers.dev"></label>
+    <button id="grant-host" type="button" class="secondary" hidden>このサーバーへの送信を許可 / Allow sending to this server</button>
     <button id="save-settings" type="button">保存</button>
     <p class="hint">Redirect URL: <code id="redirect-url"></code></p>
     <p class="hint">Twitch 開発者コンソールの OAuth Redirect URL に登録してください</p>

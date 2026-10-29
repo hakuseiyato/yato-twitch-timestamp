@@ -2,7 +2,9 @@
 
 importScripts('lib.js');
 
-const DEFAULT_SETTINGS = { clientId: '', lagSec: 5 };
+// serverUrl が空ならサーバーへは送らない / An empty serverUrl means nothing is sent to the server
+const DEFAULT_SETTINGS = { clientId: '105fdov1w7trd0swseu50l5qy2sckg', lagSec: 5, serverUrl: '' };
+const SERVER_URL_ERROR = 'サーバー URL は https://ホスト名 の形で入力してください / Server URL must be https://host';
 const streamCache = new Map();
 let storageChain = Promise.resolve();
 
@@ -10,6 +12,30 @@ function serializedStorage(operation) {
   const next = storageChain.then(operation, operation);
   storageChain = next.catch(function () {});
   return next;
+}
+
+// 入力されたサーバー URL を https の origin（末尾 / なし）にする。空は ''
+// Normalizes the server URL to an https origin (no trailing slash); empty gives ''.
+function normalizeServerUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  let url;
+  try {
+    url = new URL(text);
+  } catch (error) {
+    throw new Error(SERVER_URL_ERROR);
+  }
+  if (url.protocol !== 'https:' || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) {
+    throw new Error(SERVER_URL_ERROR);
+  }
+  return url.origin;
+}
+
+// サーバーへのホスト権限があるか（権限の要求はユーザー操作が要るので popup が行う）
+// Whether the host permission for the server is granted (popup requests it, since that needs a user gesture).
+async function hasHostPermission(serverUrl) {
+  if (!serverUrl) return false;
+  return chrome.permissions.contains({ origins: [serverUrl + '/*'] });
 }
 
 async function readState() {
@@ -275,13 +301,16 @@ async function handleMessage(message) {
     case 'getState': {
       const state = await readState();
       state.redirectUrl = chrome.identity.getRedirectURL();
+      state.serverPermission = await hasHostPermission(state.settings.serverUrl);
       return state;
     }
     case 'saveSettings': {
       const state = await readState();
       const nextSettings = {
-        clientId: String(message.settings.clientId || '').trim(),
-        lagSec: Number(message.settings.lagSec)
+        // 空欄は既定の Client ID / An empty Client ID falls back to the default
+        clientId: String(message.settings.clientId || '').trim() || DEFAULT_SETTINGS.clientId,
+        lagSec: Number(message.settings.lagSec),
+        serverUrl: normalizeServerUrl(message.settings.serverUrl)
       };
       if (!Number.isFinite(nextSettings.lagSec) || nextSettings.lagSec < 0) throw new Error('遅延（秒）には 0 以上の数値を入力してください');
       const reloginRequired = nextSettings.clientId !== state.settings.clientId;
@@ -369,4 +398,4 @@ chrome.commands.onCommand.addListener(async function (command) {
 
 // Node のテストから読むための公開（拡張では module が無いので何もしない）
 // Exposed for Node tests; a no-op in the extension where module is undefined.
-if (typeof module !== 'undefined') module.exports = { handleMessage: handleMessage, readState: readState };
+if (typeof module !== 'undefined') module.exports = { handleMessage: handleMessage, readState: readState, hasHostPermission: hasHostPermission };

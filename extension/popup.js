@@ -6,6 +6,8 @@
     authButton: document.getElementById('auth-button'),
     clientId: document.getElementById('client-id'),
     lagSec: document.getElementById('lag-sec'),
+    serverUrl: document.getElementById('server-url'),
+    grantHost: document.getElementById('grant-host'),
     saveSettings: document.getElementById('save-settings'),
     redirectUrl: document.getElementById('redirect-url'),
     csvImport: document.getElementById('csv-import'),
@@ -110,6 +112,9 @@
   function renderState() {
     elements.clientId.value = currentState.settings.clientId || '';
     elements.lagSec.value = currentState.settings.lagSec;
+    elements.serverUrl.value = currentState.settings.serverUrl || '';
+    // 権限が無いときだけ許可ボタンを出す / Show the grant button only while the permission is missing
+    elements.grantHost.hidden = !currentState.settings.serverUrl || Boolean(currentState.serverPermission);
     elements.redirectUrl.textContent = currentState.redirectUrl || chrome.identity.getRedirectURL();
     const loggedIn = Boolean(currentState.auth && currentState.auth.token);
     elements.authStatus.textContent = loggedIn ? currentState.auth.login + ' でログイン中' : '未ログイン';
@@ -128,11 +133,27 @@
         type: 'saveSettings',
         settings: {
           clientId: elements.clientId.value,
-          lagSec: elements.lagSec.value
+          lagSec: elements.lagSec.value,
+          serverUrl: elements.serverUrl.value
         }
       });
       await loadState();
       setStatus(result.reloginRequired ? 'Client ID が変更されたため、再ログインしてください' : '設定を保存しました', false);
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+
+  // permissions.request はユーザー操作の中でしか呼べないので popup から直接呼ぶ
+  // permissions.request needs a user gesture, so the popup calls it directly.
+  elements.grantHost.addEventListener('click', async function () {
+    const serverUrl = currentState && currentState.settings.serverUrl;
+    if (!serverUrl) return;
+    try {
+      const granted = await chrome.permissions.request({ origins: [serverUrl + '/*'] });
+      await loadState();
+      setStatus(granted ? 'サーバーへの送信を許可しました / Sending to the server is allowed'
+        : 'サーバーへの送信は許可されませんでした / Sending to the server was not allowed', !granted);
     } catch (error) {
       setStatus(error.message, true);
     }
