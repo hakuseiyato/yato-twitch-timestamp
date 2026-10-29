@@ -2,6 +2,7 @@
 // Worker entry point. /api and /auth go to the router, everything else to static pages
 import TSLib from '../../panel/js/lib.js';
 import { registerAuthRoutes, TwitchUnavailable } from './auth';
+import { registerChatRoutes } from './chat';
 import { error, json } from './http';
 import { registerMemberRoutes } from './members';
 import { Router } from './router';
@@ -20,6 +21,7 @@ registerAuthRoutes(router);
 registerMemberRoutes(router);
 registerStreamRoutes(router);
 registerStampRoutes(router);
+registerChatRoutes(router);
 
 async function handleRoute(request: Request, env: Env, url: URL): Promise<Response> {
   const found = router.match(request);
