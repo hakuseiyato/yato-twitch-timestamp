@@ -125,11 +125,313 @@ async function testSaveSettingsEmptyClientIdUsesDefault() {
   assert.strictEqual(fc.storage.settings.serverUrl, '');
 }
 
+const STAMPS_URL = PROD_ORIGIN + '/api/stamps';
+
+// 送信テスト用の記録 / A record for upload tests
+function makeRecord(id, streamId, extra) {
+  return Object.assign({
+    id: id, stream_id: streamId || '999', channel: 'terano_naa', started_at: '2026-10-30T10:00:00Z',
+    offset_sec: 10, created_at: '2026-10-30T10:01:00Z', updated_at: '2026-10-30T10:01:00Z',
+    deleted: false, clock_skew_ms: 0, by: 'mod1', memo: '', native: false
+  }, extra || {});
+}
+
+// サーバー URL・ログイン・ホスト権限がそろった偽 chrome / A fake chrome with server URL, login and host permission
+function syncChrome(extraStorage, options) {
+  const opts = options || {};
+  const fc = createFakeChrome(Object.assign({
+    settings: { clientId: 'cid', lagSec: 5, serverUrl: opts.serverUrl === undefined ? PROD_ORIGIN : opts.serverUrl },
+    auth: { token: 'tok', login: 'mod1', userId: '1' },
+    records: []
+  }, extraStorage || {}));
+  if (opts.permission !== false) fc.calls.permissions.add(PROD_ORIGIN + '/*');
+  return fc;
+}
+
+// Twitch 側の経路（編集者でない: マーカーは 403） / Twitch routes (non-editor: markers return 403)
+function twitchRoutes() {
+  return [
+    { match: (u) => u.startsWith('https://id.twitch.tv/oauth2/validate'),
+      respond: () => ({ status: 200, body: { client_id: 'cid', login: 'mod1', user_id: '1', scopes: ['channel:manage:broadcast'] } }) },
+    { match: (u) => u === 'https://api.twitch.tv/helix/streams/markers',
+      respond: () => ({ status: 403, body: { error: 'Forbidden', message: 'not an editor' } }) },
+    { match: (u) => u.startsWith('https://api.twitch.tv/helix/streams?'),
+      respond: () => ({ status: 200, body: { data: [{ id: '999', type: 'live', started_at: new Date(Date.now() - 600000).toISOString(), user_id: '55' }] } }) }
+  ];
+}
+
+// 送った id を全部 accepted で返す / Answers with every sent id accepted
+function acceptAll(u, init) {
+  return { status: 200, body: { accepted: JSON.parse(init.body).records.map((r) => r.id), rejected: [] } };
+}
+
+function stampsCalls(fetchImpl) {
+  return fetchImpl.calls.filter((c) => c.url === STAMPS_URL);
+}
+
+async function testStampUploadsToServer() {
+  const fc = syncChrome();
+  const fetchImpl = fakeFetch(twitchRoutes().concat([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]));
+  const bg = loadBackground(fc, fetchImpl);
+  const res = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: 'm' });
+  await bg.uploadPending();
+  const calls = stampsCalls(fetchImpl);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].init.method, 'POST');
+  assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer tok');
+  assert.strictEqual(calls[0].init.headers['Content-Type'], 'application/json');
+  const body = JSON.parse(calls[0].init.body);
+  assert.strictEqual(body.source, 'extension');
+  assert.strictEqual(body.records.length, 1);
+  assert.strictEqual(body.records[0].id, res.record.id);
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.strictEqual(fc.storage.lastSync.accepted, 1);
+  assert.strictEqual(fc.storage.lastSync.error, '');
+  assert.ok(fc.storage.lastSync.at);
+  const state = await bg.handleMessage({ type: 'getState' });
+  assert.deepStrictEqual(state.pending, []);
+  assert.deepStrictEqual(state.failed, []);
+  assert.strictEqual(state.lastSync.accepted, 1);
+}
+
+async function testNetworkFailureKeepsPendingAndAlarmRetries() {
+  const fc = syncChrome();
+  let online = false;
+  const fetchImpl = fakeFetch(twitchRoutes().concat([{ match: (u) => u === STAMPS_URL, respond: (u, init) => {
+    if (!online) throw new Error('offline');
+    return acceptAll(u, init);
+  } }]));
+  const bg = loadBackground(fc, fetchImpl);
+  const res = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: '' });
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'network');
+  assert.deepStrictEqual(fc.storage.pending, [res.record.id]);
+  assert.strictEqual(fc.storage.lastSync.error, 'network');
+  // 起動時に 5 分間隔の alarm を作る / A 5-minute alarm is created on load
+  assert.deepStrictEqual(fc.calls.alarms, [['yts-flush', { periodInMinutes: 5 }]]);
+  online = true;
+  await fc.calls.alarmHandler({ name: 'yts-flush' });
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.strictEqual(fc.storage.lastSync.error, '');
+}
+
+async function testStaleIsSuccess() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: () => ({ status: 200, body: { accepted: [], rejected: [{ id: 'y0000001', reason: 'stale' }] } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.deepStrictEqual(fc.storage.failed, []);
+}
+
+async function testUnauthorizedMarksExpiredAndLoginResends() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([
+    { match: (u, init) => u === STAMPS_URL && init.headers.Authorization === 'Bearer tok',
+      respond: () => ({ status: 401, body: { error: 'unauthorized' } }) },
+    { match: (u) => u === STAMPS_URL, respond: acceptAll },
+    { match: (u) => u.startsWith('https://id.twitch.tv/oauth2/validate'),
+      respond: () => ({ status: 200, body: { client_id: 'cid', login: 'mod1', user_id: '1', scopes: ['channel:manage:broadcast'] } }) }
+  ]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'unauthorized');
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+  assert.strictEqual(fc.storage.auth.expired, true);
+  assert.strictEqual(fc.storage.auth.token, 'tok');
+  assert.strictEqual(fc.storage.lastSync.error, 'unauthorized');
+  let state = await bg.handleMessage({ type: 'getState' });
+  assert.strictEqual(state.auth.expired, true);
+
+  // 再ログインで expired が消え、送り直す / Logging in again clears expired and resends
+  fc.chrome.identity.launchWebAuthFlow = async (details) => {
+    const nonce = new URL(details.url).searchParams.get('state');
+    return 'https://fakeextensionid.chromiumapp.org/#access_token=tok2&state=' + nonce;
+  };
+  await bg.handleMessage({ type: 'login' });
+  await bg.uploadPending();
+  state = await bg.handleMessage({ type: 'getState' });
+  assert.ok(!state.auth.expired);
+  assert.strictEqual(state.auth.token, 'tok2');
+  assert.deepStrictEqual(fc.storage.pending, []);
+  const calls = stampsCalls(fetchImpl);
+  assert.strictEqual(calls[calls.length - 1].init.headers.Authorization, 'Bearer tok2');
+}
+
+async function testRejectedReasonGoesToFailed() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: () => ({ status: 200, body: { accepted: [], rejected: [{ id: 'y0000001', reason: 'forbidden_channel' }] } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.rejected, 1);
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.strictEqual(fc.storage.failed.length, 1);
+  assert.strictEqual(fc.storage.failed[0].id, 'y0000001');
+  assert.strictEqual(fc.storage.failed[0].reason, 'forbidden_channel');
+  assert.strictEqual(fc.storage.lastSync.failedCount, 1);
+}
+
+async function testClientErrorMovesBatchToFailed() {
+  const fc = syncChrome({ records: [makeRecord('y0000001'), makeRecord('y0000002')], pending: ['y0000001', 'y0000002'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: () => ({ status: 413, body: { error: 'too_many_records' } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'too_many_records');
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.deepStrictEqual(fc.storage.failed.map((f) => [f.id, f.reason]), [['y0000001', 'too_many_records'], ['y0000002', 'too_many_records']]);
+  assert.strictEqual(fc.storage.lastSync.error, 'too_many_records');
+}
+
+async function testServerErrorKeepsPending() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: () => ({ status: 503, body: { error: 'twitch_unavailable' } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, '503');
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+  assert.deepStrictEqual((await bg.readState()).failed, []);
+}
+
+async function testLargeQueueIsSplitInto500() {
+  const records = [];
+  for (let i = 0; i < 1200; i += 1) records.push(makeRecord('y' + i.toString(16).padStart(7, '0'), '999', { offset_sec: i }));
+  const fc = syncChrome({ records: records, pending: records.map((r) => r.id) });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.deepStrictEqual(stampsCalls(fetchImpl).map((c) => JSON.parse(c.init.body).records.length), [500, 500, 200]);
+  assert.strictEqual(summary.accepted, 1200);
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
+async function testNoServerUrlSendsNothing() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')] }, { serverUrl: '' });
+  const fetchImpl = fakeFetch(twitchRoutes());
+  const bg = loadBackground(fc, fetchImpl);
+  const res = await bg.handleMessage({ type: 'stamp', url: 'https://www.twitch.tv/terano_naa', memo: '' });
+  await bg.uploadPending();
+  await bg.handleMessage({ type: 'syncNow' });
+  assert.strictEqual(stampsCalls(fetchImpl).length, 0);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), ['y0000001', res.record.id].sort());
+}
+
+async function testSyncNowSendsEveryRecord() {
+  const tomb = makeRecord('y0000002', '999', { deleted: true, updated_at: '2026-10-30T10:02:00Z' });
+  const fc = syncChrome({ records: [makeRecord('y0000001'), tomb], pending: [] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.handleMessage({ type: 'syncNow' });
+  assert.strictEqual(summary.accepted, 2);
+  const calls = stampsCalls(fetchImpl);
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(JSON.parse(calls[0].init.body).records.map((r) => [r.id, r.deleted]), [['y0000001', false], ['y0000002', true]]);
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
+async function testNoPermissionSendsNothing() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] }, { permission: false });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'permission_required');
+  assert.strictEqual(fetchImpl.calls.length, 0);
+  assert.strictEqual(fc.storage.lastSync.error, 'permission_required');
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+}
+
+async function testImportRecordsEnqueues() {
+  const fc = syncChrome();
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const res = await bg.handleMessage({ type: 'importRecords', records: [makeRecord('y0000001'), makeRecord('y0000002', '999', { offset_sec: 20 })] });
+  assert.strictEqual(res.added, 2);
+  assert.deepStrictEqual(fc.storage.pending.slice().sort(), ['y0000001', 'y0000002']);
+  await bg.uploadPending();
+  assert.deepStrictEqual(JSON.parse(stampsCalls(fetchImpl)[0].init.body).records.map((r) => r.id).sort(), ['y0000001', 'y0000002']);
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
+async function testAcceptedClearsOldFailure() {
+  const fc = syncChrome({
+    records: [makeRecord('y0000001'), makeRecord('y0000002')],
+    pending: ['y0000001'],
+    failed: [{ id: 'y0000001', reason: 'invalid_record', at: '2026-10-30T09:00:00Z' }, { id: 'y0000002', reason: 'forbidden_channel', at: '2026-10-30T09:00:00Z' }]
+  });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.failed.map((f) => f.id), ['y0000002']);
+  assert.strictEqual(fc.storage.lastSync.failedCount, 1);
+}
+
+async function testReadStateDefaultsClientIdWhenEmpty() {
+  const fc = createFakeChrome({ settings: { clientId: '', lagSec: 5 } });
+  const bg = loadBackground(fc, fakeFetch([]));
+  const state = await bg.readState();
+  assert.strictEqual(state.settings.clientId, DEFAULT_CLIENT_ID);
+  assert.deepStrictEqual(state.pending, []);
+  assert.deepStrictEqual(state.failed, []);
+  assert.strictEqual(state.lastSync, null);
+}
+
+async function testUpdateMemoUploads() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.handleMessage({ type: 'updateMemo', id: 'y0000001', memo: 'later' });
+  await bg.uploadPending();
+  const calls = stampsCalls(fetchImpl);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(JSON.parse(calls[0].init.body).records[0].memo, 'later');
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
+// 送信中にメモを直したら、その id は送り直す / An id edited while its upload is in flight is sent again
+async function testEditDuringUploadIsResent() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  let bg;
+  let first = true;
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: async (u, init) => {
+    if (first) {
+      first = false;
+      await bg.handleMessage({ type: 'updateMemo', id: 'y0000001', memo: 'edited' });
+    }
+    return acceptAll(u, init);
+  } }]);
+  bg = loadBackground(fc, fetchImpl);
+  await bg.uploadPending();
+  await bg.uploadPending();
+  const calls = stampsCalls(fetchImpl);
+  assert.deepStrictEqual(calls.map((c) => JSON.parse(c.init.body).records[0].memo), ['', 'edited']);
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
 (async () => {
   await testStampWithoutEditorFallsBackToLocal();
   await testUnmockedFetchIsReported();
   await testSaveSettingsServerUrl();
   await testSaveSettingsEmptyClientIdUsesDefault();
+  await testStampUploadsToServer();
+  await testNetworkFailureKeepsPendingAndAlarmRetries();
+  await testStaleIsSuccess();
+  await testUnauthorizedMarksExpiredAndLoginResends();
+  await testRejectedReasonGoesToFailed();
+  await testClientErrorMovesBatchToFailed();
+  await testServerErrorKeepsPending();
+  await testLargeQueueIsSplitInto500();
+  await testNoServerUrlSendsNothing();
+  await testSyncNowSendsEveryRecord();
+  await testNoPermissionSendsNothing();
+  await testImportRecordsEnqueues();
+  await testAcceptedClearsOldFailure();
+  await testReadStateDefaultsClientIdWhenEmpty();
+  await testUpdateMemoUploads();
+  await testEditDuringUploadIsResent();
   console.log('all tests passed');
 })().catch((error) => {
   console.error(error);
