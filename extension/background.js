@@ -366,3 +366,7 @@ chrome.commands.onCommand.addListener(async function (command) {
     // The active tab may not have the content script.
   }
 });
+
+// Node のテストから読むための公開（拡張では module が無いので何もしない）
+// Exposed for Node tests; a no-op in the extension where module is undefined.
+if (typeof module !== 'undefined') module.exports = { handleMessage: handleMessage, readState: readState };
