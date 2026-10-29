@@ -13,7 +13,7 @@ describe('shared pages', () => {
   it('GET /s/<id>/comments serves comments.html', async () => {
     const res = await request('/s/abc/comments', { redirect: 'manual' });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('Comments page (placeholder)');
+    expect(await res.text()).toContain('src="/js/comments.js"');
   });
 });
 

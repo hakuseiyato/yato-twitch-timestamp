@@ -278,6 +278,15 @@ main.wide { max-width: 1280px; }
 .row-list li.in-bin { border-left-color: var(--accent); background: var(--highlight); }
 .row-list li.flash { border-left-color: var(--warning); background: var(--highlight); }
 
+/* 切り離したコメント一覧 / Detached comment list */
+main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var(--space-sm); }
+.popout-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); }
+.popout-bar h1 { min-width: 0; font-size: var(--text-lg); overflow-wrap: anywhere; }
+.popout-bar a { display: inline-flex; align-items: center; min-height: var(--control-h); margin-left: auto; white-space: nowrap; }
+.popout .list-scroll { flex: 1 1 0; min-height: 0; max-height: none; border-top: 1px solid var(--border); }
+.popout .field-error:empty { min-height: 0; }
+.row-list li.empty { display: block; border-left: 0; }
+
 @media (max-width: 640px) {
   .graph-wrap { height: 140px; }
   .row-list li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 var(--space-sm); }
