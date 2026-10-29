@@ -13,7 +13,7 @@
     "migrate:local": "wrangler d1 migrations apply yts --local --persist-to .wrangler/state",
     "migrate:remote": "wrangler d1 migrations apply yts --remote",
     "deploy": "wrangler deploy",
-    "build:web": "node -e \"require('fs').copyFileSync('../panel/js/lib.js','web/js/lib.js')\""
+    "build:web": "node -e \"const fs=require('fs');fs.mkdirSync('web/js',{recursive:true});fs.copyFileSync('../panel/js/lib.js','web/js/lib.js')\""
   },
   "dependencies": {},
   "devDependencies": {

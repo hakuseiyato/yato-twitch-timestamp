@@ -959,4 +959,9 @@ if (fs.existsSync(panelLib)) {
   assert.strictEqual(fs.readFileSync(panelLib, 'utf8'), fs.readFileSync(path.resolve(__dirname, '../extension/lib.js'), 'utf8'),
     'panel/js/lib.js is stale: re-run panel/install.ps1');
 }
+
+// Web ページも lib.js の複製を配る（service で `npm run build:web`）。古ければ失敗させる
+// The web pages ship a copy of lib.js (made by `npm run build:web` in service/); fail if it is stale.
+assert.ok(fs.readFileSync(path.resolve(__dirname, '../service/web/js/lib.js')).equals(fs.readFileSync(panelLib)),
+  'service/web/js/lib.js is stale: re-run `npm run build:web` in service/');
 console.log('all tests passed');
