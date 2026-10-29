@@ -411,6 +411,58 @@ async function testEditDuringUploadIsResent() {
   assert.deepStrictEqual(fc.storage.pending, []);
 }
 
+async function testDeleteRecordSendsTombstone() {
+  const fc = syncChrome({ records: [makeRecord('y0000001'), makeRecord('y0000002', '999', { offset_sec: 20 })] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  // popup は一覧の記録をそのまま送る / The popup sends the listed record as is
+  const res = await bg.handleMessage({ type: 'deleteRecord', record: makeRecord('y0000001') });
+  assert.strictEqual(res.tombstoned, true);
+  await bg.uploadPending();
+  assert.strictEqual(fc.storage.records.length, 2);
+  const tomb = fc.storage.records.find((r) => r.id === 'y0000001');
+  assert.strictEqual(tomb.deleted, true);
+  assert.notStrictEqual(tomb.updated_at, '2026-10-30T10:01:00Z');
+  assert.strictEqual(fc.storage.records.find((r) => r.id === 'y0000002').deleted, false);
+  const calls = stampsCalls(fetchImpl);
+  assert.strictEqual(calls.length, 1);
+  const sent = JSON.parse(calls[0].init.body).records;
+  assert.deepStrictEqual(sent.map((r) => [r.id, r.deleted]), [['y0000001', true]]);
+  assert.deepStrictEqual(fc.storage.pending, []);
+}
+
+async function testForbiddenTombstoneGoesToFailed() {
+  const fc = syncChrome({ records: [makeRecord('y0000001', '999', { by: 'other' })] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
+    respond: () => ({ status: 200, body: { accepted: [], rejected: [{ id: 'y0000001', reason: 'forbidden_tombstone' }] } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.handleMessage({ type: 'deleteRecord', record: makeRecord('y0000001', '999', { by: 'other' }) });
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.pending, []);
+  assert.deepStrictEqual(fc.storage.failed.map((f) => [f.id, f.reason]), [['y0000001', 'forbidden_tombstone']]);
+  // 手元では墓標のまま / It stays a tombstone locally
+  assert.strictEqual(fc.storage.records[0].deleted, true);
+}
+
+async function testDeleteStreamIsLocalOnly() {
+  const fc = syncChrome({
+    records: [makeRecord('y0000001', '999'), makeRecord('y0000002', '999', { offset_sec: 20 }), makeRecord('y0000003', '888')],
+    pending: ['y0000001', 'y0000003'],
+    failed: [{ id: 'y0000002', reason: 'forbidden_channel', at: '2026-10-30T09:00:00Z' }, { id: 'y0000003', reason: 'invalid_record', at: '2026-10-30T09:00:00Z' }]
+  }, { permission: false });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: acceptAll }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.handleMessage({ type: 'deleteStream', stream_id: '999' });
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.records.map((r) => r.id), ['y0000003']);
+  assert.deepStrictEqual(fc.storage.pending, ['y0000003']);
+  assert.deepStrictEqual(fc.storage.failed.map((f) => f.id), ['y0000003']);
+  // 権限を足して送っても、消した配信の記録は送らない / Even with permission, the deleted stream's records are not sent
+  fc.calls.permissions.add(PROD_ORIGIN + '/*');
+  await bg.uploadPending();
+  assert.deepStrictEqual(stampsCalls(fetchImpl).map((c) => JSON.parse(c.init.body).records.map((r) => r.id)), [['y0000003']]);
+}
+
 (async () => {
   await testStampWithoutEditorFallsBackToLocal();
   await testUnmockedFetchIsReported();
@@ -432,6 +484,9 @@ async function testEditDuringUploadIsResent() {
   await testReadStateDefaultsClientIdWhenEmpty();
   await testUpdateMemoUploads();
   await testEditDuringUploadIsResent();
+  await testDeleteRecordSendsTombstone();
+  await testForbiddenTombstoneGoesToFailed();
+  await testDeleteStreamIsLocalOnly();
   console.log('all tests passed');
 })().catch((error) => {
   console.error(error);

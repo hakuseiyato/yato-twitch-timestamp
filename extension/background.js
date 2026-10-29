@@ -517,26 +517,35 @@ async function handleMessage(message) {
         return result;
       });
     case 'deleteStream':
+      // 配信ごとの削除は手元だけ（墓標にせず、送らない）。送信待ち・失敗からも外す
+      // Deleting a whole stream is local only (no tombstones, nothing sent); its ids also leave pending and failed.
       return serializedStorage(async function () {
         const state = await readState();
-        const records = state.records.filter(function (record) { return record.stream_id !== message.stream_id; });
-        await chrome.storage.local.set({ records: records });
+        const all = TSLib.mergeRecords(state.records);
+        const removed = new Set(all.filter(function (record) { return record.stream_id === message.stream_id; }).map(function (record) { return record.id; }));
+        await chrome.storage.local.set({
+          records: all.filter(function (record) { return !removed.has(record.id); }),
+          pending: state.pending.filter(function (id) { return !removed.has(id); }),
+          failed: state.failed.filter(function (entry) { return !removed.has(entry.id); })
+        });
         return {};
       });
     case 'deleteRecord':
+      // 記録の削除は墓標にしてサーバーへ送る / Deleting a record turns it into a tombstone that is uploaded
       return serializedStorage(async function () {
         const state = await readState();
-        const target = TSLib.recordKey(message.record);
-        let removed = false;
-        const records = state.records.filter(function (record) {
-          if (!removed && TSLib.recordKey(record) === target) {
-            removed = true;
-            return false;
-          }
-          return true;
-        });
+        // mergeRecords で id の無い古い記録にも popup と同じ id を付ける / mergeRecords gives old records the same ids the popup sees
+        const records = TSLib.mergeRecords(state.records);
+        const targetId = TSLib.mergeRecords([message.record || {}])[0].id;
+        const index = records.findIndex(function (record) { return record.id === targetId; });
+        if (index < 0) return { tombstoned: false };
+        records[index] = TSLib.tombstoneRecord(records[index], new Date().toISOString());
         await chrome.storage.local.set({ records: records });
-        return {};
+        await addPending([targetId]);
+        return { tombstoned: true };
+      }).then(function (result) {
+        if (result.tombstoned) kickUpload();
+        return result;
       });
     default:
       throw new Error('不明な操作です');
