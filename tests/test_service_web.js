@@ -5,6 +5,7 @@
 const assert = require('assert');
 const Bins = require('../service/web/js/bins.js');
 const Chat = require('../service/web/js/chat-fetch.js');
+const Api = require('../service/web/js/api.js');
 const page = require('../service/test/fixtures/gql_comments_page.json');
 
 // ビン分け / Binning
@@ -57,5 +58,10 @@ const j = JSON.parse(Chat.buildChatJson('1', 100, [[1,'a','A','x']]));
 assert.deepStrictEqual(j.comments, [[1,'a','A','x']]); assert.strictEqual(j.vod_id, '1');
 assert.strictEqual(j.length_sec, 100); assert.strictEqual(j.client, 'web/1.0');
 assert.ok(!Number.isNaN(Date.parse(j.fetched_at)));
+
+// 一覧の日時（ローカル時刻）/ List dates (local time)
+assert.strictEqual(Api.formatDate(new Date(2026, 9, 29, 9, 5).toISOString()), '2026-10-29 09:05');
+assert.strictEqual(Api.formatDate(''), '—');
+assert.strictEqual(Api.formatDate(null), '—');
 
 console.log('all tests passed');

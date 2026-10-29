@@ -1,1 +1,57 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>Yato Twitch Timestamp / Yato Twitch Timestamp</title></head><body></body></html>
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配信一覧 / Streams — Yato Twitch Timestamp</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header class="site-header" id="site-header" hidden></header>
+
+<main>
+  <!-- 読み込み中 / Loading -->
+  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+
+  <!-- 未サインイン / Signed out -->
+  <section class="card signin" id="signin-view" hidden>
+    <h1>Yato Twitch Timestamp</h1>
+    <p class="muted">配信のスタンプとチャットをチームで共有します / Share stream stamps and chat with your team</p>
+    <button type="button" class="primary" id="signin-button" hidden>Twitch でサインイン / Sign in with Twitch</button>
+    <p class="status" id="signin-status" role="status"></p>
+  </section>
+
+  <!-- サインイン後 / Signed in -->
+  <section class="card" id="streams-view" hidden aria-labelledby="streams-heading">
+    <div class="card-head">
+      <h1 id="streams-heading">配信一覧 / Streams</h1>
+      <div class="field narrow push">
+        <label for="channel-select">チャンネル / Channel</label>
+        <select id="channel-select"></select>
+      </div>
+      <button type="button" class="secondary" id="vod-toggle" aria-expanded="false" aria-controls="vod-form">VOD から登録 / Register from VOD</button>
+    </div>
+
+    <form id="vod-form" hidden novalidate>
+      <div class="form-row">
+        <div class="field">
+          <label for="vod-input">VOD の URL か ID / VOD URL or ID</label>
+          <input id="vod-input" name="vod" autocomplete="off" placeholder="https://www.twitch.tv/videos/1234567890" aria-describedby="vod-error">
+        </div>
+        <button type="submit" class="primary" id="vod-submit">登録 / Register</button>
+        <button type="button" class="secondary" id="vod-cancel">閉じる / Close</button>
+      </div>
+      <p class="field-error" id="vod-error" role="alert"></p>
+      <button type="button" class="primary" id="vod-resignin" hidden>Twitch でサインイン / Sign in with Twitch</button>
+    </form>
+
+    <p class="status" id="streams-status" role="status"></p>
+    <div id="stream-list"></div>
+  </section>
+</main>
+
+<script src="/js/chat-fetch.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/index.js"></script>
+</body>
+</html>

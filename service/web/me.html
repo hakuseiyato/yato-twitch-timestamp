@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マイページ / My page — Yato Twitch Timestamp</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header class="site-header" id="site-header" hidden></header>
+
+<main>
+  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+
+  <section class="card" id="account-view" hidden aria-labelledby="account-heading">
+    <h1 id="account-heading">マイページ / My page</h1>
+    <p>サインイン中 / Signed in as <strong id="me-login"></strong> <span class="muted" id="me-via"></span></p>
+  </section>
+
+  <section class="card" id="tokens-view" hidden aria-labelledby="tokens-heading">
+    <h2 id="tokens-heading">パネル用トークン / Panel tokens</h2>
+    <p class="muted">Premiere / After Effects のパネルからサーバーへ同期するときに使います / Used by the Premiere / After Effects panel to sync with the server</p>
+
+    <form id="issue-form" novalidate>
+      <div class="form-row">
+        <div class="field">
+          <label for="token-label">ラベル（任意） / Label (optional)</label>
+          <input id="token-label" maxlength="100" autocomplete="off" placeholder="例: 編集用 PC / e.g. Editing PC">
+        </div>
+        <button type="submit" class="primary" id="issue-button">発行 / Issue</button>
+      </div>
+    </form>
+
+    <div class="reveal" id="token-reveal" hidden>
+      <p class="warning" role="alert">このトークンは今だけ表示されます。パネルに貼り付けてから閉じてください / This token is shown only once. Paste it into the panel before leaving.</p>
+      <div class="form-row">
+        <input id="token-value" readonly aria-label="発行したトークン / Issued token">
+        <button type="button" class="secondary" id="copy-button">コピー / Copy</button>
+      </div>
+      <p class="status" id="copy-status" role="status"></p>
+    </div>
+
+    <p class="status" id="tokens-status" role="status"></p>
+    <div class="table-wrap" id="token-list"></div>
+  </section>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/me.js"></script>
+</body>
+</html>

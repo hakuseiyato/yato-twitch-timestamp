@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>サインイン中 / Signing in — Yato Twitch Timestamp</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+  <section class="card signin">
+    <h1>Yato Twitch Timestamp</h1>
+    <p class="status" id="callback-status" role="status">サインイン中… / Signing in…</p>
+    <a href="/" id="callback-back" hidden>トップへ戻る / Back to top</a>
+  </section>
+</main>
+
+<script src="/js/api.js"></script>
+<script>
+'use strict';
+// Twitch の implicit grant から戻ったところ。#access_token と state を確かめて session を作る
+// Back from Twitch's implicit grant. Checks #access_token and state, then creates the session.
+(function () {
+  const status = document.getElementById('callback-status');
+  // 拒否されたときは error がクエリに来ることがあるので両方読む / On denial the error may arrive in the query, so read both
+  const params = new URLSearchParams(location.hash.slice(1));
+  const query = new URLSearchParams(location.search);
+  const get = function (key) { return params.get(key) || query.get(key); };
+
+  // URL からトークンを消す（履歴・共有に残さない）/ Drop the token from the URL (keep it out of history and sharing)
+  history.replaceState(null, '', location.pathname);
+
+  function fail(text) {
+    YTSApi.setStatus(status, text, 'error');
+    document.getElementById('callback-back').hidden = false;
+  }
+
+  let expected = null;
+  try {
+    expected = sessionStorage.getItem('yts_state');
+    sessionStorage.removeItem('yts_state');
+  } catch (e) {
+    expected = null;
+  }
+
+  const error = get('error');
+  if (error) {
+    fail('サインインできませんでした / Sign-in failed: ' + (get('error_description') || error));
+    return;
+  }
+  const state = get('state');
+  if (!state || !expected || state !== expected) {
+    fail('サインインの確認に失敗しました（state 不一致）。もう一度サインインしてください / Sign-in check failed (state mismatch). Please sign in again.');
+    return;
+  }
+  const token = params.get('access_token');
+  if (!token) {
+    fail('トークンを受け取れませんでした / No token was returned');
+    return;
+  }
+
+  YTSApi.api('/api/auth/session', { method: 'POST', body: { token: token } }).then(function () {
+    try { sessionStorage.setItem('yts_twitch_token', token); } catch (e) { /* storage blocked: Helix で再サインインを促す / Helix will ask to sign in again */ }
+    location.replace('/');
+  }, function (e) {
+    fail('サインインに失敗しました / Sign-in failed: ' + YTSApi.errorText(e));
+  });
+}());
+</script>
+</body>
+</html>

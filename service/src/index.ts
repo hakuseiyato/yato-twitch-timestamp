@@ -42,6 +42,9 @@ export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+    // サインインの戻り先は静的ページ（auth/callback.html）。他の /auth/ は router
+    // The sign-in return page is static (auth/callback.html); other /auth/ paths go to the router
+    if (path === '/auth/callback') return env.ASSETS.fetch(request);
     if (path.startsWith('/api/') || path.startsWith('/auth/')) return handleRoute(request, env, url);
     // 共有ページ /s/<id> と /s/<id>/comments。拡張子なしで引く（.html だと 307 で /s へ飛ばされ ID が消える）
     // Shared pages /s/<id> and /s/<id>/comments. Fetch without the extension (.html would 307 to /s and drop the id)

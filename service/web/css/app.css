@@ -1,0 +1,218 @@
+/* Hallmark · macrostructure: utility dashboard (single column) · tone: quiet tool, panel-matched dark · anchor hue: panel accent #2d8ceb */
+/* Web ページ共通のスタイル。配色と字体はパネル（panel/css/styles.css）の変数に揃える */
+/* Shared styles for the web pages. Colours and fonts follow the panel's variables (panel/css/styles.css) */
+
+:root {
+  color-scheme: dark;
+  /* パネルと同じ色 / Same colours as the panel */
+  --bg: #232323;
+  --surface: #2b2b2b;
+  --surface-raised: #303030;
+  --field: #1b1b1b;
+  --border: #3a3a3a;
+  --text: #e6e6e6;
+  --secondary: #a8a8a8;
+  --accent: #2d8ceb;
+  --accent-strong: #1473e6; /* white text on it: 4.5:1 */
+  --on-accent: #fff;
+  --link: #6cb2f5;          /* on #232323: 7.0:1 */
+  --error: #ef7373;
+  --ok: #77c879;
+  --warning: #e0b050;
+  --highlight: #2d8ceb22;
+  --shadow: #0008;
+  /* 字体 / Fonts */
+  --font-body: system-ui, "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  /* 4px 刻みの余白 / 4px spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 40px;
+  --radius: 4px;
+  --radius-lg: 8px;
+  --control-h: 44px;
+  --content-w: 960px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { overflow-x: clip; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+a { color: var(--link); }
+a:hover { text-decoration-thickness: 2px; }
+h1, h2, h3 { margin: 0; font-style: normal; line-height: 1.25; }
+h1 { font-size: var(--text-xl); letter-spacing: -0.01em; }
+h2 { font-size: var(--text-lg); }
+p { margin: 0; }
+
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- 操作部品 / Controls ---- */
+button, select, input {
+  min-height: var(--control-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+button { padding: 0 var(--space-lg); cursor: pointer; white-space: nowrap; }
+select, input { min-width: 0; padding: 0 var(--space-md); }
+input[readonly] { color: var(--text); font-family: var(--font-mono); }
+button:hover:not(:disabled) { filter: brightness(1.15); }
+button:active:not(:disabled) { filter: brightness(0.9); }
+button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
+button[aria-busy="true"] { cursor: progress; }
+.primary { border-color: var(--accent-strong); background: var(--accent-strong); color: var(--on-accent); }
+.secondary { background: var(--surface-raised); }
+.danger { color: var(--error); }
+.danger:hover:not(:disabled) { border-color: var(--error); }
+input.invalid { border-color: var(--error); }
+
+/* ---- 見出しバー / Header ---- */
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-lg);
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand { color: var(--text); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.site-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); margin-left: auto; }
+.site-nav a { display: inline-flex; align-items: center; min-height: var(--control-h); white-space: nowrap; }
+.site-nav a[aria-current="page"] { color: var(--text); text-decoration: none; font-weight: 600; }
+.who { color: var(--secondary); white-space: nowrap; }
+
+/* ---- 本文 / Main ---- */
+main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  width: 100%;
+  max-width: var(--content-w);
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg) var(--space-2xl);
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.stack { display: flex; flex-direction: column; gap: var(--space-xl); }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
+.card-head h2 { min-width: 0; overflow-wrap: anywhere; }
+.card-head .push { margin-left: auto; }
+.muted { color: var(--secondary); }
+.mono { font-family: var(--font-mono); }
+
+/* 未サインインの中央カード / Centred card for signed-out visitors */
+.signin {
+  align-items: center;
+  max-width: 420px;
+  margin: 12vh auto 0;
+  padding: var(--space-2xl) var(--space-xl);
+  text-align: center;
+}
+
+/* ---- フォーム / Forms ---- */
+.form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm); }
+.field { display: flex; flex: 1 1 200px; flex-direction: column; gap: var(--space-xs); min-width: 0; }
+.field.narrow { flex: 0 1 240px; }
+.field label { color: var(--secondary); font-size: var(--text-sm); }
+.field-error { min-height: 1.5em; color: var(--error); font-size: var(--text-sm); }
+
+/* 状態表示 / Status lines */
+.status { min-height: 1.5em; color: var(--secondary); }
+.status.ok { color: var(--ok); }
+.status.error { color: var(--error); }
+.status:empty { min-height: 0; }
+
+/* 1 回だけ表示するトークン / Token shown once */
+.reveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  background: var(--field);
+}
+.reveal .warning { color: var(--warning); }
+.reveal .form-row input { flex: 1 1 260px; }
+
+/* ---- 配信一覧（行全体がリンク）/ Stream list (whole row is a link) ---- */
+.stream-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.stream-grid {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 110px 220px;
+  gap: var(--space-md);
+  align-items: center;
+}
+.stream-head { padding: var(--space-sm) var(--space-md); color: var(--secondary); font-size: var(--text-sm); }
+.stream-row {
+  min-height: var(--control-h);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  color: var(--text);
+  text-decoration: none;
+}
+.stream-row:hover { background: var(--surface-raised); }
+.stream-row.is-new { border-left-color: var(--accent); background: var(--highlight); }
+.stream-date, .stream-stamps { font-variant-numeric: tabular-nums; }
+.stream-title { min-width: 0; overflow: hidden; color: var(--link); white-space: nowrap; text-overflow: ellipsis; }
+.stream-title.untitled { color: var(--secondary); }
+.stream-stamps { text-align: right; }
+.stream-chat { white-space: nowrap; }
+.chat-done { color: var(--ok); }
+.chat-none { color: var(--secondary); }
+.empty { padding: var(--space-xl) var(--space-md); color: var(--secondary); text-align: center; }
+
+/* ---- 表 / Tables ---- */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+th { color: var(--secondary); font-size: var(--text-sm); font-weight: normal; }
+td { overflow-wrap: anywhere; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.actions { width: 1%; white-space: nowrap; text-align: right; }
+
+/* ---- 403 などの案内 / Notices such as 403 ---- */
+.notice { padding: var(--space-xl) var(--space-lg); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); color: var(--secondary); text-align: center; }
+.notice strong { display: block; margin-bottom: var(--space-sm); color: var(--text); font-size: var(--text-lg); }
+
+@media (max-width: 640px) {
+  main { padding: var(--space-lg) var(--space-lg) var(--space-xl); }
+  .stream-head { display: none; }
+  /* 2 行に畳む: タイトル / 日時・数 / Fold into two lines: title / date and counts */
+  .stream-grid { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md); }
+  .stream-title { grid-column: 1 / -1; grid-row: 1; }
+  .stream-date { grid-column: 1; grid-row: 2; color: var(--secondary); }
+  .stream-stamps { grid-column: 2; grid-row: 2; }
+  .stream-chat { grid-column: 1 / -1; grid-row: 3; font-size: var(--text-sm); }
+  .site-nav { margin-left: 0; }
+  .card-head .push { flex-basis: 100%; margin-left: 0; }
+}
