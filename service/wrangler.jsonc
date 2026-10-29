@@ -1,0 +1,33 @@
+// Yato Twitch Timestamp のクラウド側 Worker の設定
+// Worker configuration for the Yato Twitch Timestamp cloud side
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yato-twitch-timestamp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  // 静的ページ。/api などを Worker で処理するため Worker を先に通す
+  // Static pages. The Worker runs first so it can handle /api and friends
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  // スタンプ・配信・会員 / Stamps, streams and members
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yts",
+      // 本番の ID はデプロイ時に差し替える / Replace with the real ID before deploying
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // チャットの JSON / Chat replay JSON
+  "r2_buckets": [
+    { "binding": "CHAT", "bucket_name": "yts-chat" }
+  ],
+  "vars": {
+    "TWITCH_CLIENT_ID": ""
+  }
+}

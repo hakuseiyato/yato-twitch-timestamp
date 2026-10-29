@@ -1,0 +1,26 @@
+{
+  "name": "yato-twitch-timestamp-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Yato Twitch Timestamp のクラウド側（Cloudflare Worker と Web ページ） / Cloud side of Yato Twitch Timestamp (Cloudflare Worker and web pages)",
+  "scripts": {
+    "dev": "wrangler dev --persist-to .wrangler/state",
+    "test": "vitest run",
+    "test:web": "node ../tests/test_service_web.js",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types --strict-vars false",
+    "migrate:local": "wrangler d1 migrations apply yts --local --persist-to .wrangler/state",
+    "migrate:remote": "wrangler d1 migrations apply yts --remote",
+    "deploy": "wrangler deploy",
+    "build:web": "node -e \"require('fs').copyFileSync('../panel/js/lib.js','web/js/lib.js')\""
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.1.13",
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.135.0"
+  }
+}

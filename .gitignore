@@ -3,3 +3,5 @@
 *.bak
 node_modules/
 dist/
+service/node_modules/
+service/.wrangler/

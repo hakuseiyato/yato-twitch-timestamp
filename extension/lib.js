@@ -1011,6 +1011,7 @@ const TSLib = (function () {
   return {
     posToFractions: posToFractions,
     fractionsToPos: fractionsToPos,
+    validLogin: validLogin,
     channelFromUrl: channelFromUrl,
     computeOffsetSec: computeOffsetSec,
     localOffsetSec: localOffsetSec,
@@ -1032,6 +1033,8 @@ const TSLib = (function () {
     legacyId: legacyId,
     newId: newId,
     isValidId: isValidId,
+    repairId: repairId,
+    round3: round3,
     normalizeRecord: normalizeRecord,
     syncPlan: syncPlan,
     markerTolerance: markerTolerance,
