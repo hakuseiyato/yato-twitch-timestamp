@@ -5,6 +5,7 @@ import { registerAuthRoutes, TwitchUnavailable } from './auth';
 import { error, json } from './http';
 import { registerMemberRoutes } from './members';
 import { Router } from './router';
+import { registerStampRoutes } from './stamps';
 import { registerStreamRoutes } from './streams';
 
 const router = new Router();
@@ -18,6 +19,7 @@ router.add('GET', '/api/health', async ({ url }) => {
 registerAuthRoutes(router);
 registerMemberRoutes(router);
 registerStreamRoutes(router);
+registerStampRoutes(router);
 
 async function handleRoute(request: Request, env: Env, url: URL): Promise<Response> {
   const found = router.match(request);

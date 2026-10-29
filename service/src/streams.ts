@@ -7,21 +7,32 @@ import { error, json, readJson } from './http';
 import type { Router } from './router';
 
 // Twitch の stream_id、または VOD から作った仮の ID / A Twitch stream_id, or a provisional ID made from a VOD
-const STREAM_ID_PATTERN = /^(?:[0-9]{1,30}|vod-[0-9]{1,30})$/;
-const VOD_ID_PATTERN = /^[0-9]{1,30}$/;
+export const STREAM_ID_PATTERN = /^(?:[0-9]{1,30}|vod-[0-9]{1,30})$/;
+export const VOD_ID_PATTERN = /^[0-9]{1,30}$/;
 const TITLE_MAX = 500;
 // vod_offset_sec / chat_lag_sec の許容範囲（秒）/ Allowed range of vod_offset_sec / chat_lag_sec (seconds)
 const OFFSET_LIMIT_SEC = 3600;
 
-// 無ければ INSERT、あれば何もしない（Task 6 のスタンプ受信でも使う）
-// Inserts when missing, does nothing when present (also used when stamps arrive in Task 6)
+// 無ければ INSERT、あれば何もしない（スタンプ受信でも使う）。started_at は ISO に揃える
+// 戻り値の channel は呼び出し後に実在する行のもの（既存行なら引数と違うことがある）
+// Inserts when missing, does nothing when present (also used when stamps arrive). started_at is normalized to ISO
+// The returned channel is that of the row that exists after the call (may differ from the argument for an existing row)
 export async function ensureStream(
   env: Env,
   stream: { stream_id: string; channel: string; started_at: string; title?: string },
-): Promise<void> {
-  await env.DB.prepare('INSERT OR IGNORE INTO streams (stream_id, channel, started_at, title, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(stream.stream_id, stream.channel, stream.started_at, stream.title ?? '', nowIso())
-    .run();
+): Promise<{ channel: string; created: boolean }> {
+  const [inserted, current] = await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO streams (stream_id, channel, started_at, title, created_at) VALUES (?, ?, ?, ?, ?)').bind(
+      stream.stream_id,
+      stream.channel,
+      new Date(stream.started_at).toISOString(),
+      stream.title ?? '',
+      nowIso(),
+    ),
+    env.DB.prepare('SELECT channel FROM streams WHERE stream_id = ?').bind(stream.stream_id),
+  ]);
+  const row = (current.results as { channel: string }[])[0];
+  return { channel: row.channel, created: inserted.meta.changes === 1 };
 }
 
 function isTitle(value: unknown): value is string {
@@ -33,7 +44,7 @@ function isOffset(value: unknown): value is number {
 }
 
 // 配信行を引く。無ければ 404 を throw（会員の確認は呼び出し側）/ Loads a stream row. Throws 404 when missing (callers check membership)
-async function loadStream(env: Env, id: string): Promise<StreamRow> {
+export async function loadStream(env: Env, id: string): Promise<StreamRow> {
   const row = await env.DB.prepare('SELECT * FROM streams WHERE stream_id = ?').bind(id).first<StreamRow>();
   if (!row) throw error(404, 'not_found');
   return row;

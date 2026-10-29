@@ -165,9 +165,11 @@ describe('streams', () => {
     expect(await csrf.json()).toEqual({ error: 'csrf' });
   });
 
-  it('ensureStream inserts once and never overwrites', async () => {
-    await ensureStream(env, { stream_id: '9100', channel: 'st_j', started_at: '2026-10-10T00:00:00.000Z', title: 'one' });
-    await ensureStream(env, { stream_id: '9100', channel: 'other', started_at: '2026-10-11T00:00:00.000Z', title: 'two' });
+  it('ensureStream inserts once, never overwrites and returns the channel of the existing row', async () => {
+    const first = await ensureStream(env, { stream_id: '9100', channel: 'st_j', started_at: '2026-10-10T00:00:00Z', title: 'one' });
+    expect(first).toEqual({ channel: 'st_j', created: true });
+    const second = await ensureStream(env, { stream_id: '9100', channel: 'other', started_at: '2026-10-11T00:00:00.000Z', title: 'two' });
+    expect(second).toEqual({ channel: 'st_j', created: false });
     const row = await env.DB.prepare('SELECT * FROM streams WHERE stream_id = ?').bind('9100').first<StreamRow>();
     expect(row).toMatchObject({ channel: 'st_j', started_at: '2026-10-10T00:00:00.000Z', title: 'one', chat_lag_sec: 5 });
   });
