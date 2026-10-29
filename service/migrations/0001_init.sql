@@ -37,8 +37,9 @@ CREATE TABLE streams (
 );
 
 CREATE TABLE stamps (
-  -- 'y' + 7 hex。拡張・パネルと同じ採番 / 'y' + 7 hex, same scheme as the extension and panel
-  id TEXT PRIMARY KEY,
+  -- 'y' + 7 hex。拡張・パネルと同じ採番。乱数 28 bit なので配信をまたいで重なりうる → 主キーは (stream_id, id)
+  -- 'y' + 7 hex, same scheme as the extension and panel. Only 28 random bits, so ids may repeat across streams → key is (stream_id, id)
+  id TEXT,
   stream_id TEXT,
   offset_sec REAL,
   by TEXT,
@@ -49,7 +50,8 @@ CREATE TABLE stamps (
   deleted INTEGER DEFAULT 0,
   clock_skew_ms INTEGER,
   -- 'extension' / 'web' / 'panel'
-  source TEXT
+  source TEXT,
+  PRIMARY KEY (stream_id, id)
 );
 
 CREATE TABLE api_tokens (

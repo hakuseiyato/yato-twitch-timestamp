@@ -136,6 +136,12 @@ describe('POST /api/stamps', () => {
     expect(await stampRow('y6000401')).toMatchObject({ by: 'yato', memo: 'edited' });
     const bypass = await post('mod1', [rec('60004', { id: 'y6000401', by: 'mod1', deleted: true, updated_at: '2026-10-20T13:00:00.000Z' })]);
     expect(bypass.rejected).toEqual([{ id: 'y6000401', reason: 'forbidden_tombstone' }]);
+
+    // by の大文字小文字は問わない（保存は送られたまま）/ `by` is compared case-insensitively (stored as sent)
+    await post('mod1', [rec('60004', { id: 'y6000405', by: 'Mod1' })]);
+    expect((await stampRow('y6000405'))?.by).toBe('Mod1');
+    const mixedCase = await post('mod1', [rec('60004', { id: 'y6000405', by: 'Mod1', deleted: true, updated_at: later })]);
+    expect(mixedCase.accepted).toEqual(['y6000405']);
   });
 
   it('rows of a non-member channel, or of a stream that belongs to another channel, are forbidden_channel', async () => {
@@ -160,12 +166,49 @@ describe('POST /api/stamps', () => {
     expect((await env.DB.prepare('SELECT channel FROM streams WHERE stream_id = ?').bind('60005').first<{ channel: string }>())?.channel).toBe('other_ch');
   });
 
-  it('an id already used in another stream is id_conflict', async () => {
+  it('the same id on two streams is accepted for both and listed under each', async () => {
     await seedTerano();
-    await post('mod1', [rec('60008', { id: 'y6000801' })]);
-    const moved = await post('mod1', [rec('60009', { id: 'y6000801', updated_at: '2026-10-21T00:00:00.000Z' })]);
-    expect(moved.rejected).toEqual([{ id: 'y6000801', reason: 'id_conflict' }]);
-    expect((await stampRow('y6000801'))?.stream_id).toBe('60008');
+    await post('mod1', [rec('60008', { id: 'y6000801', memo: 'eight' })]);
+    const other = await post('mod1', [rec('60009', { id: 'y6000801', memo: 'nine', updated_at: '2026-10-21T00:00:00.000Z' })]);
+    expect(other).toEqual({ accepted: ['y6000801'], rejected: [] });
+    for (const [streamId, memo] of [['60008', 'eight'], ['60009', 'nine']]) {
+      const res = await call('mod1', 'GET', `/api/streams/${streamId}/stamps`);
+      const { records } = (await res.json()) as { records: StampRecord[] };
+      expect(records.map((r) => [r.id, r.stream_id, r.memo])).toEqual([['y6000801', streamId, memo]]);
+    }
+  });
+
+  it('more than 500 records is 413 before any write; 3 records on one new stream are all accepted', async () => {
+    await seedTerano();
+    const many = Array.from({ length: 501 }, (_, i) => rec('60012', { id: 'y60120' + i.toString(16).padStart(2, '0').slice(-2) }));
+    const res = await call('mod1', 'POST', '/api/stamps', { records: many });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'too_many_records', detail: 'max 500' });
+    expect(await env.DB.prepare('SELECT 1 FROM streams WHERE stream_id = ?').bind('60012').first()).toBeNull();
+    expect(await env.DB.prepare('SELECT 1 FROM stamps WHERE stream_id = ?').bind('60012').first()).toBeNull();
+
+    const three = await post('mod1', [rec('60013', { id: 'y6001301' }), rec('60013', { id: 'y6001302' }), rec('60013', { id: 'y6001303' })]);
+    expect(three).toEqual({ accepted: ['y6001301', 'y6001302', 'y6001303'], rejected: [] });
+    expect((await env.DB.prepare('SELECT channel FROM streams WHERE stream_id = ?').bind('60013').first<{ channel: string }>())?.channel).toBe(CHANNEL);
+  });
+
+  it('created_at / updated_at far in the future or before 2000 is invalid_time', async () => {
+    await seedTerano();
+    const ahead = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const result = await post('mod1', [
+      rec('60014', { id: 'y6001401', updated_at: ahead(24 * 3600 * 1000) }),
+      rec('60014', { id: 'y6001402', created_at: ahead(24 * 3600 * 1000), updated_at: '' }),
+      rec('60014', { id: 'y6001403', updated_at: '1999-12-31T23:59:59.000Z' }),
+      rec('60014', { id: 'y6001404', updated_at: ahead(60 * 1000) }),
+    ]);
+    expect(result).toEqual({
+      accepted: ['y6001404'],
+      rejected: [
+        { id: 'y6001401', reason: 'invalid_time' },
+        { id: 'y6001402', reason: 'invalid_time' },
+        { id: 'y6001403', reason: 'invalid_time' },
+      ],
+    });
   });
 
   it('the same id twice in one request keeps the newer one', async () => {
