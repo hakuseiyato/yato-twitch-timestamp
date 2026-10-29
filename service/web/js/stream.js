@@ -429,7 +429,7 @@
       progress('0 件 / 0 comments');
       const rows = await YTSChat.fetchVodChat(vodId, function (n) {
         progress(n.toLocaleString() + ' 件 / ' + n.toLocaleString() + ' comments');
-      }, { signal: controller.signal });
+      }, { signal: controller.signal, lengthSeconds: vod ? Number(vod.lengthSeconds) : undefined });
       const length = vod
         ? Number(vod.lengthSeconds)
         : Math.ceil(rows.reduce(function (m, r) { return Math.max(m, Number(r[0]) || 0); }, 0));

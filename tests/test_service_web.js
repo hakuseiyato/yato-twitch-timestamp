@@ -79,4 +79,52 @@ assert.strictEqual(Graph.labelStep(60, 10), 10);
 assert.strictEqual(Graph.labelStep(120, 100), 1);
 assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 
-console.log('all tests passed');
+// 取得の拒否は最終ページ扱いにしない / A rejected fetch is never treated as the last page
+assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'failed integrity check', extensions: { code: 'IntegrityCheckFailed' } }], data: { video: { id: '1', comments: null } } }]),
+  /チャット取得が拒否されました \/ Chat fetch rejected: .*failed integrity check/);
+assert.throws(() => Chat.parseCommentsPage([{ data: { video: { id: '1', comments: null } } }]), /Chat fetch rejected/);
+assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'IntegrityCheckFailed' }], data: { video: { comments: { edges: [], pageInfo: {} } } } }]),
+  /Chat fetch rejected: IntegrityCheckFailed/);
+assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'x' }], data: { video: null } }]), /VOD not found/);
+
+// ページ間の重複除去 / De-duplication across pages
+const seenIds = new Set();
+assert.strictEqual(Chat.mergeComments(seenIds, nodes).length, 3);
+const page2 = [nodes[1], nodes[2], { ...nodes[2], id: 'new-id', contentOffsetSeconds: 999 }];
+const fresh = Chat.mergeComments(seenIds, page2);
+assert.deepStrictEqual(fresh.map(r => r[0]), [999]);
+assert.strictEqual(Chat.mergeComments(seenIds, page2).length, 0);
+
+// fetchVodChat: offset で進む・cursor を送らない・重複なし・終端で止まる
+// fetchVodChat: pages by offset, never sends a cursor, no duplicates, stops at the end
+function fakeNode(id, sec) {
+  return { id: id, contentOffsetSeconds: sec, commenter: { login: 'u', displayName: 'U' }, message: { fragments: [{ text: id }] } };
+}
+// 窓は [offset-5, offset+20] の 3 件ずつ（5 秒おき 0..60）/ Windows of 3 comments around the offset (every 5 s, 0..60)
+const fakeAll = Array.from({ length: 13 }, (_, i) => fakeNode('c' + i, i * 5));
+async function runFake(lengthSeconds) {
+  const sent = [];
+  global.fetch = async function (url, init) {
+    const v = JSON.parse(init.body)[0].variables;
+    sent.push(v);
+    const window = fakeAll.filter(n => n.contentOffsetSeconds >= v.contentOffsetSeconds - 5).slice(0, 3);
+    const last = window.length ? window[window.length - 1].contentOffsetSeconds : 0;
+    return { ok: true, status: 200, json: async () => [{ data: { video: { comments: {
+      edges: window.map(n => ({ cursor: 'c', node: n })), pageInfo: { hasNextPage: last < 60 } } } } }] };
+  };
+  const rows = await Chat.fetchVodChat('1', null, { lengthSeconds: lengthSeconds });
+  return { rows: rows, sent: sent };
+}
+
+(async function () {
+  const a = await runFake(61);
+  assert.deepStrictEqual(a.rows.map(r => r[0]), fakeAll.map(n => n.contentOffsetSeconds));
+  assert.ok(a.sent.every(v => !('cursor' in v) && typeof v.contentOffsetSeconds === 'number'));
+  assert.strictEqual(a.sent[0].contentOffsetSeconds, 0);
+  const b = await runFake(undefined);
+  assert.strictEqual(b.rows.length, 13);
+  // 拒否は例外になる（黙って打ち切らない）/ A rejection throws (no silent truncation)
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => [{ errors: [{ message: 'failed integrity check' }], data: { video: { comments: null } } }] });
+  await assert.rejects(Chat.fetchVodChat('1', null, {}), /Chat fetch rejected/);
+  console.log('all tests passed');
+}()).catch(function (e) { console.error(e); process.exit(1); });

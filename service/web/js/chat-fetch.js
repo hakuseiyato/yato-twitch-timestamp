@@ -30,24 +30,51 @@ const YTSChat = (function () {
     ];
   }
 
-  // コメント 1 ページ（応答の配列の先頭）→ {comments, cursor, hasNextPage}。VOD が無ければ例外
-  // One comments page (first element of the response array) -> {comments, cursor, hasNextPage}; throws when the VOD is missing.
+  // コメント 1 ページ（応答の配列の先頭）→ {comments, nodes, cursor, hasNextPage}。VOD が無ければ例外
+  // comments: null や errors（IntegrityCheckFailed など）は最終ページとみなさず例外にする（黙って打ち切らない）
+  // One comments page (first element of the response array) -> {comments, nodes, cursor, hasNextPage}; throws when the VOD is missing.
+  // comments: null or errors (IntegrityCheckFailed and the like) throw instead of reading as the last page (no silent truncation).
   function parseCommentsPage(page) {
     const entry = Array.isArray(page) ? page[0] : page;
     const video = entry && entry.data ? entry.data.video : null;
     if (!video) throw new Error('VOD が見つかりません / VOD not found');
-    const block = video.comments || { edges: [], pageInfo: {} };
+    const errors = entry.errors;
+    if (!video.comments || (Array.isArray(errors) && errors.length)) {
+      const first = Array.isArray(errors) && errors[0] ? String(errors[0].message || '') : '';
+      throw new Error('チャット取得が拒否されました / Chat fetch rejected: ' + (first || 'comments: null'));
+    }
+    const block = video.comments;
     const edges = block.edges || [];
     const comments = [];
+    const nodes = [];
     for (const edge of edges) {
-      const row = normalizeComment(edge && edge.node);
-      if (row) comments.push(row);
+      const node = edge && edge.node;
+      const row = normalizeComment(node);
+      if (!row) continue;
+      comments.push(row);
+      nodes.push(node);
     }
     return {
       comments: comments,
+      nodes: nodes,
       cursor: edges.length ? edges[edges.length - 1].cursor : null,
       hasNextPage: Boolean(block.pageInfo && block.pageInfo.hasNextPage)
     };
+  }
+
+  // ページの node のうち未見の id だけを整形して返し、seenIds に足す。id が無い node は offset・login・本文で見分ける
+  // Normalizes only the nodes whose id is unseen and adds them to seenIds. Nodes without an id are keyed by offset, login and text.
+  function mergeComments(seenIds, pageNodes) {
+    const fresh = [];
+    for (const node of pageNodes || []) {
+      const row = normalizeComment(node);
+      if (!row) continue;
+      const key = node.id ? String(node.id) : row[0] + '|' + row[1] + '|' + row[3];
+      if (seenIds.has(key)) continue;
+      seenIds.add(key);
+      fresh.push(row);
+    }
+    return fresh;
   }
 
   // VOD の URL か数字だけの ID → ID 文字列。読めなければ null
@@ -139,27 +166,51 @@ const YTSChat = (function () {
     }));
   }
 
-  // VOD のチャットを先頭から hasNextPage が偽になるまで逐次取得する。onProgress(取得件数) をページごとに呼ぶ
-  // options.signal（AbortSignal）が中止されると AbortError で止まる
-  // Fetches a VOD's chat sequentially from the start until hasNextPage is false; calls onProgress(count) after each page.
-  // Stops with an AbortError once options.signal (an AbortSignal) is aborted.
+  // VOD のチャットを contentOffsetSeconds で先頭から逐次取得する（cursor は Twitch の integrity 検査で拒否されるため使わない）
+  // 1 ページは offset の前後の窓なので、ページ間の重複は id で除く。次の offset は前ページ最後のコメントの秒（戻らない）
+  // 新しい id が 0 件のとき: hasNextPage が偽か、次の秒が lengthSeconds を超えるなら終わり。そうでなければ 1 秒進める
+  // ページ数の上限（lengthSeconds が分かれば ceil(length/10)+50、不明なら 5000）に達したら例外（黙って打ち切らない）
+  // options: { lengthSeconds?, signal? }。signal が中止されると AbortError。onProgress(累計件数) をページごとに呼ぶ
+  // Fetches a VOD's chat sequentially by contentOffsetSeconds (no cursor: Twitch rejects it with an integrity check).
+  // A page is a window around the offset, so overlaps between pages are removed by id. The next offset is the last comment's second (never backwards).
+  // With zero new ids: stop when hasNextPage is false or the next second would pass lengthSeconds; otherwise advance one second.
+  // Hitting the page cap (ceil(length/10)+50 when lengthSeconds is known, else 5000) throws (no silent truncation).
+  // options: { lengthSeconds?, signal? }. An aborted signal gives an AbortError. onProgress(total count) runs after each page.
   async function fetchVodChat(vodId, onProgress, options) {
-    const signal = options && options.signal;
+    const opts = options || {};
+    const signal = opts.signal;
+    const length = Number(opts.lengthSeconds) > 0 ? Number(opts.lengthSeconds) : null;
+    const maxPages = length !== null ? Math.ceil(length / 10) + 50 : 5000;
+    const seenIds = new Set();
     const all = [];
-    let variables = { videoID: String(vodId), contentOffsetSeconds: 0 };
-    for (;;) {
+    let offset = 0;
+    for (let pageNo = 0; pageNo < maxPages; pageNo++) {
       if (signal && signal.aborted) throw new DOMException('中止しました / Aborted', 'AbortError');
       const page = await postGql([{
         operationName: 'VideoCommentsByOffsetOrCursor',
-        variables: variables,
+        variables: { videoID: String(vodId), contentOffsetSeconds: offset },
         extensions: { persistedQuery: { version: 1, sha256Hash: COMMENTS_HASH } }
       }], signal);
       const parsed = parseCommentsPage(page);
-      for (const row of parsed.comments) all.push(row);
+      const fresh = mergeComments(seenIds, parsed.nodes);
+      for (const row of fresh) all.push(row);
       if (onProgress) onProgress(all.length);
-      if (!parsed.hasNextPage || !parsed.cursor) return all;
-      variables = { videoID: String(vodId), cursor: parsed.cursor };
+      const lastNode = parsed.nodes[parsed.nodes.length - 1];
+      let next = Math.max(offset, lastNode ? Number(lastNode.contentOffsetSeconds) || 0 : offset);
+      if (fresh.length === 0) {
+        if (!parsed.hasNextPage || (length !== null && offset + 1 > length)) return sortByOffset(all);
+        next = offset + 1;
+      }
+      // 終端より後ろを要求すると Twitch は comments: null を返す / Asking past the end makes Twitch return comments: null
+      if (length !== null && next > length) return sortByOffset(all);
+      offset = next;
     }
+    throw new Error('チャット取得がページ数の上限に達しました / Chat fetch hit the page limit (' + maxPages + ')');
+  }
+
+  // 窓の重なりで順序が前後しうるので offset の昇順に揃える（安定ソート）/ Windows may interleave, so sort by offset (stable)
+  function sortByOffset(rows) {
+    return rows.sort(function (a, b) { return a[0] - b[0]; });
   }
 
   return {
@@ -169,6 +220,7 @@ const YTSChat = (function () {
     parseHelixDuration: parseHelixDuration,
     pickVod: pickVod,
     buildChatJson: buildChatJson,
+    mergeComments: mergeComments,
     listVods: listVods,
     fetchVodChat: fetchVodChat
   };
