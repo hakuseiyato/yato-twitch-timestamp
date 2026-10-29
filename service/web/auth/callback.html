@@ -36,6 +36,8 @@
     document.getElementById('callback-back').hidden = false;
   }
 
+  // state は sessionStorage か cookie のどちらかと一致すればよい（読んだら両方消す）
+  // state must match either sessionStorage or the cookie (both are cleared once read)
   let expected = null;
   try {
     expected = sessionStorage.getItem('yts_state');
@@ -43,6 +45,8 @@
   } catch (e) {
     expected = null;
   }
+  const cookieState = (document.cookie.match(/(?:^|;\s*)yts_state=([0-9a-f]+)/) || [])[1] || null;
+  document.cookie = 'yts_state=; Path=/; Max-Age=0; SameSite=Lax; Secure';
 
   const error = get('error');
   if (error) {
@@ -50,7 +54,7 @@
     return;
   }
   const state = get('state');
-  if (!state || !expected || state !== expected) {
+  if (!state || (state !== expected && state !== cookieState)) {
     fail('サインインの確認に失敗しました（state 不一致）。もう一度サインインしてください / Sign-in check failed (state mismatch). Please sign in again.');
     return;
   }

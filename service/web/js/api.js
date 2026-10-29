@@ -86,11 +86,14 @@ const YTSApi = (function () {
     return Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
   }
 
-  // implicit grant の URL。state は sessionStorage に置き、callback で照合する
-  // The implicit-grant URL. state is kept in sessionStorage and checked on the callback.
+  // implicit grant の URL。state は sessionStorage と cookie の両方に置き、callback でどちらかと照合する
+  // （Brave 等の保護機能が sessionStorage を消す環境への備え。double submit 方式）
+  // The implicit-grant URL. state is kept in both sessionStorage and a cookie and either is checked on
+  // the callback (double-submit; some browsers' shields drop sessionStorage across the round trip).
   function signInUrl(clientId) {
     const state = randomState();
-    sessionStorage.setItem(STATE_KEY, state);
+    try { sessionStorage.setItem(STATE_KEY, state); } catch (e) { /* storage blocked */ }
+    document.cookie = STATE_KEY + '=' + state + '; Path=/; Max-Age=600; SameSite=Lax; Secure';
     const params = new URLSearchParams({
       response_type: 'token',
       client_id: clientId,
