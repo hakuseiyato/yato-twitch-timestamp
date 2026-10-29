@@ -3,6 +3,7 @@
 import TSLib from '../../panel/js/lib.js';
 import { registerAuthRoutes, TwitchUnavailable } from './auth';
 import { error, json } from './http';
+import { registerMemberRoutes } from './members';
 import { Router } from './router';
 
 const router = new Router();
@@ -14,6 +15,7 @@ router.add('GET', '/api/health', async ({ url }) => {
   return json(200, { ok: true });
 });
 registerAuthRoutes(router);
+registerMemberRoutes(router);
 
 async function handleRoute(request: Request, env: Env, url: URL): Promise<Response> {
   const found = router.match(request);

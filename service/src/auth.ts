@@ -1,5 +1,6 @@
 // 認証: session cookie（yts_）/ Bearer ytt_ / Bearer Twitch トークンと、その経路
 // Authentication: session cookie (yts_) / Bearer ytt_ / Bearer Twitch token, and their routes
+import { isSiteAdmin } from './access';
 import { nowIso, type ApiTokenRow, type SessionRow, type TokenCacheRow } from './db';
 import { error, json, readJson } from './http';
 import type { HandlerContext, Router } from './router';
@@ -197,8 +198,7 @@ export function registerAuthRoutes(router: Router): void {
       login: principal.login,
       via: principal.via,
       channels: results.map((row) => ({ login: row.channel, role: row.role })),
-      // ponytail: Task 4 で isSiteAdmin に置き換える / Replaced by isSiteAdmin in Task 4
-      site_admin: !!ctx.env.BOOTSTRAP_LOGIN && ctx.env.BOOTSTRAP_LOGIN === principal.login,
+      site_admin: isSiteAdmin(principal, ctx.env),
     });
   });
 

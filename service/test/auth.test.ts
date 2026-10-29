@@ -51,7 +51,7 @@ describe('auth', () => {
     // 発行された cookie で /api/me が通る / The issued cookie authenticates /api/me
     const me = await request('/api/me', { headers: { cookie: cookie.split(';')[0] } });
     expect(me.status).toBe(200);
-    expect(await me.json()).toEqual({ login: 'yato', via: 'session', channels: [], site_admin: false });
+    expect(await me.json()).toEqual({ login: 'yato', via: 'session', channels: [], site_admin: true });
   });
 
   it('session with foreign client_id is 401 client_mismatch', async () => {

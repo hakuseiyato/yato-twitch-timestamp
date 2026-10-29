@@ -11,8 +11,9 @@ export default defineConfig({
       return {
         wrangler: { configPath: './wrangler.jsonc' },
         miniflare: {
-          // テスト専用の binding。setup.ts で D1 に流す / Test-only binding, applied to D1 in setup.ts
-          bindings: { TEST_MIGRATIONS: migrations },
+          // テスト専用の binding。TEST_MIGRATIONS は setup.ts で D1 に流す。BOOTSTRAP_LOGIN はサイト管理者
+          // Test-only bindings. TEST_MIGRATIONS is applied to D1 in setup.ts; BOOTSTRAP_LOGIN is the site admin
+          bindings: { TEST_MIGRATIONS: migrations, BOOTSTRAP_LOGIN: 'yato' },
         },
       };
     }),
