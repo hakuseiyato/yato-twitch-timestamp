@@ -17,8 +17,9 @@ Records can be exported as a shared CSV sync file for the included Premiere Pro 
    The popup also shows the exact redirect URL. Register it in the Twitch developer console before logging in.
 
 4. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the `extension/` directory.
-5. Open the extension popup, paste the Twitch Client ID, and click "保存".
+5. Open the extension popup. The Client ID field is prefilled with the project's Twitch application (`105fdov1w7trd0swseu50l5qy2sckg`); an empty field also falls back to it. Paste your own Client ID only if you registered a separate application, then click "保存".
 6. Click "ログイン" and authorize the `channel:manage:broadcast` scope.
+7. Optional: to send stamps to the cloud service, see [Server sync](#サーバーと同期--server-sync).
 
 The `key` in `extension/manifest.json` pins the unpacked extension ID to `nkebinaanllmgbkpehnlcaomjcofdnng`, so the redirect URL above stays stable across machines. It was generated once with:
 
@@ -40,7 +41,39 @@ The default keyboard shortcut is `Alt+Shift+M`. Change it at `chrome://extension
 
 For broadcasters and editors, the extension asks Twitch to create a native stream marker and also saves the record locally. For moderators, Twitch normally returns 401 or 403 because the account lacks broadcaster/editor rights. This is an expected fallback: the extension saves the timestamp locally without showing a warning. If Twitch validation or channel APIs are temporarily unavailable, the last live stream information cached for that channel is used so the press is still saved locally. A moderator can export a CSV and send it to the editor, who selects "CSV を取り込む" in the popup. Imported records are merged by their stable `id`; legacy rows without a valid ID receive a deterministic ID.
 
-The popup groups non-deleted records by stream and shows whether each one is "ネイティブ" or "ローカル". A whole stream or an individual record can be deleted locally from this view. CSV export also includes tombstones so deletions continue to propagate through a shared sync file.
+The popup groups non-deleted records by stream and shows whether each one is "ネイティブ" or "ローカル". Deleting an individual record turns it into a tombstone (sent to the server when server sync is on); deleting a whole stream removes its records locally only. CSV export also includes tombstones so deletions continue to propagate through a shared sync file.
+
+## サーバーと同期 / Server sync
+
+The extension can send every stamp to the cloud service (`service/`) as well as keeping it locally. It is off until a server URL is set.
+
+Setup:
+
+1. Keep the Client ID as prefilled (the Worker accepts only tokens issued for its own Twitch application) and keep the Redirect URL registered as in [Setup](#setup); nothing changes there.
+2. Enter the server origin in "サーバー URL / Server URL", for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` is accepted (no path, query, or fragment).
+3. Click "このサーバーへの送信を許可 / Allow sending to this server" and accept Chrome's prompt. The extension declares the server only as an optional host permission, so Chrome blocks requests to it until you grant it for that origin. Once granted, the popup syncs immediately.
+4. Make sure you are logged in. The Worker checks the Twitch token and accepts stamps only for channels where your Twitch login is a member (`/admin`).
+
+Behavior:
+
+- Stamping, editing a memo, importing a CSV, and deleting an individual record each queue the affected record and upload it right away with `POST /api/stamps`. A deleted record is sent as a tombstone (`deleted: true`); the server accepts tombstones only for your own records.
+- "配信ごとの削除" (the stream-level "削除" button) is local only. It removes the stream's records from this browser and from the upload queue and sends nothing, so the stream stays on the server.
+- Records that could not be sent (offline, server error, expired login) stay in the queue. The extension retries the queue every five minutes and after the next login. "サーバーと同期 / Sync with server" queues every local record, tombstones included, and sends them now.
+- The popup shows "未送信 n 件 / pending n", "最終同期 HH:mm（成功 n）/ last sync" with the number of accepted records, and, per record, "送信済 / sent", "未送信 / pending", or "失敗 / failed" next to "ネイティブ" / "ローカル".
+- A record the server reports as `stale` is already stored there in the same or a newer version. It counts as sent and is not retried.
+
+Reading failures:
+
+- Records the server rejects one by one appear in the collapsible "失敗 n 件 / failed n" list with the last four characters of the id, the timecode, and the reason. They are not retried automatically; "失敗一覧を消す / Clear failures" empties the list, and "サーバーと同期" sends them again after you fix the cause.
+  - "他の人の記録は消せません / cannot delete others' records" (`forbidden_tombstone`): only the author (or a channel owner on the web) can delete a record on the server. It stays deleted locally.
+  - "このチャンネルの会員ではありません / not a member of this channel" (`forbidden_channel`): ask a channel owner to add your Twitch login in `/admin`.
+  - "記録の形式が不正です / invalid record" (`invalid_*`), "時刻が不正です / invalid time" (`invalid_time`), "配信情報がありません / stream missing" (`missing_stream`): the record itself is broken, typically from an edited CSV.
+- Errors that stop the whole upload are shown under the last sync line, and the records stay pending:
+  - "サーバーに届きませんでした (http_404) / server unreachable (http_404)" or another `http_<status>`: usually a wrong server URL.
+  - "通信できませんでした / network error": offline or the server is down; the five-minute retry sends them later.
+  - "サーバーへの送信が許可されていません / sending not allowed yet": grant the host permission (step 3).
+  - "ログインが必要です / login required": log in again (see below).
+- Twitch login tokens from the implicit grant expire after about four hours. When the server answers 401, or when the extension finds the token expired while stamping, the popup shows "トークンが切れました。再ログインしてください / Token expired. Log in again". Click "ログイン"; the queued records are sent after the login. Stamps keep being saved locally in the meantime.
 
 ## Lag compensation
 
@@ -153,7 +186,7 @@ The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves r
 
 `service/` is a single Cloudflare Worker deployed to the owner's personal Cloudflare account on the Free plan. The Worker serves the JSON API under `/api/` and the static pages in `service/web/`. D1 stores channels, members, streams, stamps, sessions, and panel tokens; R2 stores one chat JSON file per VOD. Users sign in with Twitch through the same Twitch application (redirect `https://<worker-host>/auth/callback`), and only members of a channel can see its streams. `/` lists the streams of the user's channels and registers a stream from a VOD URL ("VOD から登録"). `/s/<stream_id>` is the stream page: a comment-density graph (15, 30, 60, or 120 second bins, with stamp positions drawn as vertical lines), "コメント" and "スタンプ" tabs, "別ウィンドウ" to detach the comment list to `/s/<stream_id>/comments` (it follows the graph through `BroadcastChannel`), and "ここに印" to add a stamp, recorded as the signed-in user, at the start of the selected bin. "チャットを取り込む" makes the browser fetch the VOD's chat replay directly from Twitch GraphQL and upload it to the Worker once; the Worker stores the body in R2 without parsing it, and importing again overwrites it. Comment times are shifted by the stream's "VOD のずれ" and "反応の遅れ" (default five seconds) settings. `/me` issues panel tokens and `/admin` creates channels and manages members.
 
-The Chrome extension and the Adobe panel do not talk to the service yet; sending stamps from the extension and synchronizing the panel with the service are planned as follow-ups. Today the service is used through its web pages, and the CSV sync file workflow above is unchanged.
+The Chrome extension sends stamps to the service when a server URL is set (see [Server sync](#サーバーと同期--server-sync)). The Adobe panel does not talk to the service yet; synchronizing it with the service is planned as a follow-up, and the CSV sync file workflow above is unchanged.
 
 See [`service/README.md`](service/README.md) (Japanese) for setup, local development, tests, and operations. The test fixture `service/test/fixtures/gql_comments_page.json` is a synthetic page in the shape of a real Twitch GraphQL chat replay response; its logins, ids and messages are made up.
 
@@ -163,7 +196,7 @@ See [`service/README.md`](service/README.md) (Japanese) for setup, local develop
 - Native Twitch markers require the token owner to be the broadcaster or an editor with the required scope.
 - Native markers require VOD storage to be enabled and are unavailable on reruns.
 - Timestamp accuracy is approximately within a few seconds and depends on playback and network latency.
-- Twitch implicit-grant access tokens expire. Click "ログイン" again when the extension reports that the login has expired.
+- Twitch implicit-grant access tokens expire (about four hours). Click "ログイン" again when the extension reports that the login has expired; server uploads wait in the queue until then.
 - Records are held in `chrome.storage.local`; export important sessions before clearing extension data or removing the extension.
 - The CSV and sidecar must remain writable during panel synchronization.
 
@@ -175,7 +208,9 @@ The pure library has no dependencies. Run:
 node tests/test_lib.js
 ```
 
-The tests cover Twitch URL parsing, offset and timecode calculations, clock-skew correction, CSV round trips, ID-based record merging, grouping, and the three-way sync planner. Tests do not modify the sample by default. To regenerate `samples/sample.csv` through `TSLib.toCsv`, run:
+`node tests/test_background.js` runs `extension/background.js` on a fake `chrome` and `fetch` (stamping, the upload queue, retries, and server responses), and `node tests/test_popup_markup.js` checks that the popup markup and script stay in step.
+
+The library tests cover Twitch URL parsing, offset and timecode calculations, clock-skew correction, CSV round trips, ID-based record merging, grouping, and the three-way sync planner. Tests do not modify the sample by default. To regenerate `samples/sample.csv` through `TSLib.toCsv`, run:
 
 ```sh
 node tests/test_lib.js --write-sample
@@ -187,6 +222,7 @@ node tests/test_lib.js --write-sample
 - `panel/` — CEP panel for Premiere Pro and After Effects, including host-specific ExtendScript adapters and the development installer.
 - `tools/gen_key.js` — ephemeral RSA public-key and extension-ID generator.
 - `tests/test_lib.js` — dependency-free Node assertion tests, including sync planner coverage.
+- `tests/test_background.js` / `tests/fake_chrome.js` — service worker tests on a fake `chrome` and `fetch`; `tests/test_popup_markup.js` — popup element checks.
 - `service/` — Cloudflare Worker (D1 + R2 + static pages) for the cloud service; see `service/README.md`.
 - `tests/test_service_web.js` — dependency-free Node tests for the service's page logic (bins, chat shaping, VOD selection).
 - `samples/sample.csv` — example sync-file data including a multiline Japanese memo.

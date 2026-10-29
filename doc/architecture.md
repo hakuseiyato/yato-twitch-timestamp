@@ -4,7 +4,7 @@
 
 Yato Twitch Timestamp is a Manifest V3 Chrome extension for recording useful moments during Twitch live streams. Broadcasters and editors can create native Twitch markers, while moderators without permission fall back to local records through the same action. Every record is stored locally and can be exported as a CSV sync file shared with one CEP panel that supports both Premiere Pro and After Effects.
 
-`service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension and the panel do not call the service yet.
+`service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension sends its stamps to the Worker when a server URL is set; the panel does not call the service yet.
 
 ## Technology stack
 
@@ -36,9 +36,9 @@ The extension and the panel have no external libraries, package manager, or buil
 
 - `extension/manifest.json`: extension permissions, service worker, content script, popup, and keyboard shortcuts
 - `extension/lib.js`: pure functions for URL validation, timing, record normalization, CSV conversion, ID-based merging, grouping, and sync planning
-- `extension/background.js`: OAuth, Twitch API access, local and session storage, record creation, and message handling
+- `extension/background.js`: OAuth, Twitch API access, local and session storage, record creation, the server upload queue, and message handling
 - `extension/content.js` / `extension/content.css`: recording panel and toast messages on Twitch pages
-- `extension/popup.js` / `extension/popup.html` / `extension/popup.css`: settings, authentication, listing, hard deletion, CSV import, and CSV export UI
+- `extension/popup.js` / `extension/popup.html` / `extension/popup.css`: settings (including the server URL and host permission), authentication, server sync status and failure list, listing, deletion, CSV import, and CSV export UI
 - `panel/CSXS/manifest.xml`: CEP extension identity and Premiere Pro / After Effects 22+ host requirements
 - `panel/.debug`: local CEP debugging ports for Premiere Pro and After Effects
 - `panel/install.ps1`: junction-based development installer, PlayerDebugMode setup, and optional shared-library copy
@@ -84,7 +84,20 @@ Tombstones remain in storage and CSV sync files so deletion can propagate. `grou
 
 The content script or keyboard shortcut sends a recording request to the service worker. The service worker validates the token, retrieves the live stream for the target channel, and attempts to create a Twitch marker. It stores the same record format in `chrome.storage.local` regardless of the native marker result. HTTP 401 and 403 responses are treated as the normal moderator fallback. The last stream information and Twitch clock-skew estimate are cached in `chrome.storage.session` for temporary API failures.
 
-Storage read-modify-write operations are serialized through a Promise chain so rapid recordings do not overwrite one another. The popup groups non-deleted stored records by stream. CSV export uses the corresponding complete group, including tombstones. Popup deletion remains a local hard delete, while CSV and Adobe synchronization use tombstones.
+Storage read-modify-write operations are serialized through a Promise chain so rapid recordings do not overwrite one another. The popup groups non-deleted stored records by stream. CSV export uses the corresponding complete group, including tombstones. Deleting an individual record in the popup writes a tombstone; deleting a whole stream is a local hard delete that is never sent to the server.
+
+### Extension to Worker
+
+When `settings.serverUrl` is set, the extension also uploads records to the Worker:
+
+1. Every change to a record (stamp, memo edit, CSV import, individual deletion) adds its `id` to `pending` in `chrome.storage.local` inside the same serialized storage step that saves the record, then starts an upload without waiting for it.
+2. `uploadPending` runs uploads one at a time on its own Promise chain, so saving records never waits on the network and the same id is not sent twice concurrently. It sends nothing without a server URL, without a token (`login_required`), or without the optional host permission for `<serverUrl>/*` (`permission_required`); the popup requests that permission because it needs a user gesture.
+3. `planUpload` groups pending records by `stream_id` into batches of at most 500, and each batch is sent as `POST <serverUrl>/api/stamps` with `{records, source: 'extension'}` and `Authorization: Bearer <Twitch token>`.
+4. On 200, `accepted` ids and `rejected` ids with reason `stale` leave `pending` and any old failure entry. Other rejections move to `failed` as `{id, reason, at}`; retrying cannot fix them. A record edited while its batch was in flight stays pending and is sent again.
+5. A network error, 408, 429, or 5xx stops the run and keeps the rest pending. 401 also stops it and sets `auth.expired`, but only if the token used for the request is still the stored one (a login during the request is not marked expired). Any other 4xx (404, 403, 413, ...) stops the run, keeps that batch and the rest pending, and records the server's `error` code or `http_<status>`; per-record failures come only from `rejected` on 200.
+6. Each run that sent something, or stopped before sending, writes `lastSync` (`at`, `accepted`, `failedCount`, `error`). An idle run with nothing pending keeps the previous `lastSync`.
+
+A `chrome.alarms` alarm (`yts-flush`, every five minutes) retries the queue, and a successful login starts an upload. "サーバーと同期" queues every local record, tombstones included, before uploading. The popup reads `pending`, `failed`, `lastSync`, `serverPermission`, and `auth.expired` through `getState`, shows the per-record state with `recordSyncState`, maps reason codes to text with `reasonText`, and clears the failure list with `clearFailed`.
 
 ## Panel and host API
 
@@ -162,11 +175,11 @@ The browser signs in through the Twitch implicit grant, returns to `/auth/callba
 1. The Manifest `key` is already configured for extension ID `nkebinaanllmgbkpehnlcaomjcofdnng`.
 2. Register `https://nkebinaanllmgbkpehnlcaomjcofdnng.chromiumapp.org/` as the redirect URL in Twitch Developer Console.
 3. Load `extension/` as an unpacked extension from `chrome://extensions`.
-4. Save the Client ID in the popup and log in.
+4. Log in from the popup (the Client ID is prefilled). To send stamps to the service, also save the server URL and grant the host permission.
 5. Install the Adobe panel with `powershell -ExecutionPolicy Bypass -File panel\install.ps1`, restart the target app, and open **Window > Extensions > Yato Twitch Timestamp**.
 
 The installer copies `extension/lib.js` to `panel/js/lib.js` on every run (the panel loads the copy); the test suite checks that the copy is current.
 
-Run tests with `node tests/test_lib.js`.
+Run tests with `node tests/test_lib.js`, `node tests/test_background.js`, `node tests/test_popup_markup.js`, and `node tests/test_service_web.js`.
 
 For `service/` setup, local development, tests, and deployment, see `service/README.md`.
