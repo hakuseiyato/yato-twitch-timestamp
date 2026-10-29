@@ -12,7 +12,23 @@
     redirectUrl: document.getElementById('redirect-url'),
     csvImport: document.getElementById('csv-import'),
     status: document.getElementById('status'),
-    streams: document.getElementById('streams')
+    streams: document.getElementById('streams'),
+    relogin: document.getElementById('relogin'),
+    syncSection: document.getElementById('sync-section'),
+    syncNow: document.getElementById('sync-now'),
+    pendingCount: document.getElementById('pending-count'),
+    lastSync: document.getElementById('last-sync'),
+    syncError: document.getElementById('sync-error'),
+    failedDetails: document.getElementById('failed-details'),
+    failedSummary: document.getElementById('failed-summary'),
+    failedList: document.getElementById('failed-list'),
+    clearFailed: document.getElementById('clear-failed')
+  };
+  // 送信状態の印 / Sync state marks
+  const SYNC_MARKS = {
+    sent: '送信済 / sent',
+    pending: '未送信 / pending',
+    failed: '失敗 / failed'
   };
   let currentState = null;
 
@@ -100,12 +116,54 @@
         append(body, 'span', record.memo || '（メモなし）', 'memo');
         append(body, 'small', record.by || '不明');
         append(row, 'span', record.native ? 'ネイティブ' : 'ローカル', record.native ? 'badge native' : 'badge local');
+        // サーバー URL があるときだけ送信状態を出す / Show the sync state only when a server URL is set
+        if (currentState.settings.serverUrl) {
+          const syncState = TSLib.recordSyncState(record.id, currentState.pending, currentState.failed);
+          append(row, 'span', SYNC_MARKS[syncState], 'badge ' + syncState);
+        }
         actionButton(row, '削除', async function () {
           await send({ type: 'deleteRecord', record: record });
           await loadState();
           setStatus('記録を削除しました', false);
         }, true);
       });
+    });
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  function renderSync() {
+    const serverUrl = currentState.settings.serverUrl;
+    elements.syncSection.hidden = !serverUrl;
+    if (!serverUrl) return;
+    const pending = currentState.pending || [];
+    const failed = currentState.failed || [];
+    elements.pendingCount.textContent = '未送信 ' + pending.length + ' 件 / pending ' + pending.length;
+    const lastSync = currentState.lastSync;
+    const at = lastSync && lastSync.at ? new Date(lastSync.at) : null;
+    if (at && Number.isFinite(at.getTime())) {
+      const time = pad2(at.getHours()) + ':' + pad2(at.getMinutes());
+      elements.lastSync.textContent = '最終同期 ' + time + '（成功 ' + lastSync.accepted + '）/ last sync ' + time + ' (accepted ' + lastSync.accepted + ')';
+    } else {
+      elements.lastSync.textContent = '最終同期 なし / last sync: never';
+    }
+    const error = lastSync && lastSync.error ? TSLib.reasonText(lastSync.error) : '';
+    elements.syncError.textContent = error;
+    elements.syncError.hidden = !error;
+
+    // 失敗一覧: id の下 4 桁・タイムコード・理由 / Failure list: last 4 chars of the id, timecode, reason
+    elements.failedDetails.hidden = !failed.length;
+    elements.failedSummary.textContent = '失敗 ' + failed.length + ' 件 / failed ' + failed.length;
+    elements.failedList.replaceChildren();
+    const byId = new Map(TSLib.mergeRecords(currentState.records).map(function (record) { return [record.id, record]; }));
+    failed.forEach(function (entry) {
+      const record = byId.get(entry.id);
+      const row = append(elements.failedList, 'div', undefined, 'failed-row');
+      append(row, 'span', String(entry.id || '').slice(-4), 'mono');
+      append(row, 'span', record ? TSLib.formatTimecode(Math.floor(record.offset_sec)) : '--:--:--', 'timecode');
+      append(row, 'span', TSLib.reasonText(entry.reason), 'reason');
     });
   }
 
@@ -117,8 +175,14 @@
     elements.grantHost.hidden = !currentState.settings.serverUrl || Boolean(currentState.serverPermission);
     elements.redirectUrl.textContent = currentState.redirectUrl || chrome.identity.getRedirectURL();
     const loggedIn = Boolean(currentState.auth && currentState.auth.token);
+    const expired = loggedIn && Boolean(currentState.auth.expired);
     elements.authStatus.textContent = loggedIn ? currentState.auth.login + ' でログイン中' : '未ログイン';
-    elements.authButton.textContent = loggedIn ? 'ログアウト' : 'ログイン';
+    // 期限切れならボタンは再ログイン / With an expired token the button logs in again
+    elements.authButton.textContent = loggedIn && !expired ? 'ログアウト' : 'ログイン';
+    // 期限切れ、またはサーバーへ送る記録があるのに未ログインなら再ログインを促す
+    // Ask to log in again when the token expired, or when records wait for the server while logged out.
+    elements.relogin.hidden = !(expired || (!loggedIn && currentState.settings.serverUrl && (currentState.pending || []).length > 0));
+    renderSync();
     renderStreams();
   }
 
@@ -144,6 +208,33 @@
     }
   });
 
+  // 手元の記録をサーバーへ送り、表示を更新する / Sends the local records to the server and refreshes the view
+  async function syncNow() {
+    elements.syncNow.disabled = true;
+    try {
+      const result = await send({ type: 'syncNow' });
+      await loadState();
+      if (result.error) setStatus(TSLib.reasonText(result.error), true);
+      else setStatus('同期しました（成功 ' + result.accepted + '）/ Synced (accepted ' + result.accepted + ')', false);
+    } finally {
+      elements.syncNow.disabled = false;
+    }
+  }
+
+  elements.syncNow.addEventListener('click', function () {
+    syncNow().catch(function (error) { setStatus(error.message, true); });
+  });
+
+  elements.clearFailed.addEventListener('click', async function () {
+    try {
+      await send({ type: 'clearFailed' });
+      await loadState();
+      setStatus('失敗一覧を消しました / Cleared the failures', false);
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+
   // permissions.request はユーザー操作の中でしか呼べないので popup から直接呼ぶ
   // permissions.request needs a user gesture, so the popup calls it directly.
   elements.grantHost.addEventListener('click', async function () {
@@ -152,8 +243,13 @@
     try {
       const granted = await chrome.permissions.request({ origins: [serverUrl + '/*'] });
       await loadState();
-      setStatus(granted ? 'サーバーへの送信を許可しました / Sending to the server is allowed'
-        : 'サーバーへの送信は許可されませんでした / Sending to the server was not allowed', !granted);
+      if (!granted) {
+        setStatus('サーバーへの送信は許可されませんでした / Sending to the server was not allowed', true);
+        return;
+      }
+      setStatus('サーバーへの送信を許可しました / Sending to the server is allowed', false);
+      // 許可されたらすぐ送る / Send right away once allowed
+      await syncNow();
     } catch (error) {
       setStatus(error.message, true);
     }
@@ -162,7 +258,7 @@
   elements.authButton.addEventListener('click', async function () {
     elements.authButton.disabled = true;
     try {
-      if (currentState.auth && currentState.auth.token) {
+      if (currentState.auth && currentState.auth.token && !currentState.auth.expired) {
         await send({ type: 'logout' });
         setStatus('ログアウトしました', false);
       } else {

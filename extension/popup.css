@@ -35,7 +35,7 @@ h2 { margin: 0 0 9px; font-size: 14px; }
 label { display: block; margin-bottom: 8px; color: #dedee3; }
 .number-row label { width: 50%; }
 
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="number"], input[type="url"] {
   width: 100%;
   margin-top: 4px;
   padding: 7px 8px;
@@ -97,7 +97,7 @@ button.danger:hover { background: #9c2f20; }
 .record-list { margin-top: 9px; }
 .record {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   gap: 7px;
   align-items: center;
   padding: 7px 0;
@@ -119,3 +119,25 @@ button.danger:hover { background: #9c2f20; }
 
 .badge.native { background: #1f6f43; }
 .badge.local { background: #595962; }
+
+/* サーバー同期 / Server sync */
+.sync-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#pending-count { color: #dedee3; }
+.error, .warn { margin: 7px 0 0; color: #ff8c85; font-size: 12px; }
+#failed-details { margin-top: 8px; }
+#failed-details summary { cursor: pointer; color: #ff8c85; }
+#failed-details button { margin-top: 7px; }
+.failed-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 7px;
+  padding: 5px 0;
+  border-top: 1px solid #303038;
+  font-size: 11px;
+}
+.failed-row .reason { overflow-wrap: anywhere; color: #ffb3ad; }
+.mono { font-family: ui-monospace, Consolas, monospace; color: #adadb8; }
+
+.badge.sent { background: #234a6b; }
+.badge.pending { background: #6b5a1f; }
+.badge.failed { background: #7a271a; }

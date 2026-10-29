@@ -175,7 +175,9 @@ async function uploadBatch(serverUrl, token, batch, summary) {
     summary.error = 'unauthorized';
     await serializedStorage(async function () {
       const stored = await chrome.storage.local.get('auth');
-      if (stored.auth) await chrome.storage.local.set({ auth: Object.assign({}, stored.auth, { expired: true }) });
+      // 送信中に再ログインされていたら、古いトークンの 401 で新しい auth に印を付けない
+      // If the user logged in again during the request, the old token's 401 must not mark the new auth.
+      if (stored.auth && stored.auth.token === token) await chrome.storage.local.set({ auth: Object.assign({}, stored.auth, { expired: true }) });
     });
     return true;
   }
@@ -185,22 +187,10 @@ async function uploadBatch(serverUrl, token, batch, summary) {
     return true;
   }
 
-  // 送り直しても直らない 4xx: このバッチを失敗に移す / A 4xx that a retry cannot fix: move this batch to failed
-  const reason = typeof body.error === 'string' && body.error ? body.error : String(response.status);
-  summary.error = reason;
-  summary.rejected += ids.length;
-  await serializedStorage(async function () {
-    const current = await readState();
-    const at = new Date().toISOString();
-    const moved = new Set(ids);
-    const failed = current.failed.filter(function (entry) { return !moved.has(entry.id); })
-      .concat(ids.map(function (id) { return { id: id, reason: reason, at: at }; }));
-    await chrome.storage.local.set({
-      pending: current.pending.filter(function (id) { return !moved.has(id); }),
-      failed: failed
-    });
-  });
-  return false;
+  // 401 以外の 4xx（404 / 403 / 413 など）は送信を止め、このバッチと残りを pending に残す。記録ごとの失敗は 200 の rejected でだけ記録する
+  // Any other 4xx (404 / 403 / 413 ...) stops the upload and keeps this batch and the rest pending; per-record failures only come from rejected on 200.
+  summary.error = typeof body.error === 'string' && body.error ? body.error : 'http_' + response.status;
+  return true;
 }
 
 async function readLastStream(login) {
@@ -501,6 +491,10 @@ async function handleMessage(message) {
       await enqueue(TSLib.mergeRecords(state.records).map(function (record) { return record.id; }));
       return uploadPending();
     }
+    case 'clearFailed':
+      // 失敗一覧を消す（記録と送信待ちはそのまま） / Clears the failure list (records and pending stay)
+      await serializedStorage(function () { return chrome.storage.local.set({ failed: [] }); });
+      return {};
     case 'updateMemo':
       // Memo typed after stamping. Native Twitch markers cannot be edited via the API, so this only updates the local record.
       return serializedStorage(async function () {

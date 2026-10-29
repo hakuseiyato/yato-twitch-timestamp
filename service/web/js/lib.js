@@ -461,6 +461,35 @@ const TSLib = (function () {
     };
   }
 
+  // 送信の失敗理由コードを表示用の文言にする。知らないコードはそのまま
+  // Turns an upload failure code into display text; unknown codes are shown as is.
+  const REASON_TEXT = {
+    forbidden_tombstone: "他の人の記録は消せません / cannot delete others' records",
+    forbidden_channel: 'このチャンネルの会員ではありません / not a member of this channel',
+    missing_stream: '配信情報がありません / stream missing',
+    invalid_time: '時刻が不正です / invalid time',
+    permission_required: 'サーバーへの送信が許可されていません / sending not allowed yet',
+    unauthorized: 'ログインが必要です / login required',
+    login_required: 'ログインが必要です / login required',
+    network: '通信できませんでした / network error'
+  };
+
+  function reasonText(code) {
+    const text = code === undefined || code === null ? '' : String(code);
+    if (Object.prototype.hasOwnProperty.call(REASON_TEXT, text)) return REASON_TEXT[text];
+    if (/^invalid_/.test(text)) return '記録の形式が不正です / invalid record';
+    if (/^http_\d+$/.test(text)) return 'サーバーに届きませんでした (' + text + ') / server unreachable (' + text + ')';
+    return text;
+  }
+
+  // 記録の送信状態。送り直し待ちは失敗より優先する（失敗後に直された記録）
+  // A record's sync state; waiting to resend wins over an older failure (a record edited after it failed).
+  function recordSyncState(id, pendingIds, failed) {
+    if ((pendingIds || []).indexOf(id) >= 0) return 'pending';
+    if ((failed || []).some(function (entry) { return entry && entry.id === id; })) return 'failed';
+    return 'sent';
+  }
+
   // 再送で直る見込みがある応答か（0 = ネットワーク例外 / 408 / 429 / 5xx）
   // Whether a retry may succeed (0 = network failure / 408 / 429 / 5xx).
   function isRetryableUpload(status) {
@@ -1139,7 +1168,9 @@ const TSLib = (function () {
     planUpload: planUpload,
     applyUploadResult: applyUploadResult,
     isRetryableUpload: isRetryableUpload,
-    toUploadRecord: toUploadRecord
+    toUploadRecord: toUploadRecord,
+    reasonText: reasonText,
+    recordSyncState: recordSyncState
   };
 }());
 

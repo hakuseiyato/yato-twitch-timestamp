@@ -253,6 +253,31 @@ assert.deepStrictEqual(r2.pendingIds, ['e']); assert.strictEqual(r2.failed.lengt
 assert.notStrictEqual(r2.failed[0].at, 'old'); assert.strictEqual(prevFailed[0].reason, 'invalid_id');
 assert.strictEqual(TSLib.isRetryableUpload(0), true); assert.strictEqual(TSLib.isRetryableUpload(503), true); assert.strictEqual(TSLib.isRetryableUpload(401), false); assert.strictEqual(TSLib.isRetryableUpload(413), false);
 assert.strictEqual(TSLib.isRetryableUpload(408), true); assert.strictEqual(TSLib.isRetryableUpload(429), true); assert.strictEqual(TSLib.isRetryableUpload(403), false);
+// 失敗理由の表示文言と記録ごとの送信状態（popup 用） / Failure reason text and per-record sync state (for the popup)
+assert.strictEqual(TSLib.reasonText('forbidden_tombstone'), "他の人の記録は消せません / cannot delete others' records");
+assert.strictEqual(TSLib.reasonText('forbidden_channel'), 'このチャンネルの会員ではありません / not a member of this channel');
+for (const code of ['invalid_id', 'invalid_offset', 'invalid_by', 'invalid_record']) {
+  assert.strictEqual(TSLib.reasonText(code), '記録の形式が不正です / invalid record', code);
+}
+assert.strictEqual(TSLib.reasonText('invalid_time'), '時刻が不正です / invalid time');
+assert.strictEqual(TSLib.reasonText('missing_stream'), '配信情報がありません / stream missing');
+assert.strictEqual(TSLib.reasonText('permission_required'), 'サーバーへの送信が許可されていません / sending not allowed yet');
+assert.strictEqual(TSLib.reasonText('unauthorized'), 'ログインが必要です / login required');
+assert.strictEqual(TSLib.reasonText('login_required'), 'ログインが必要です / login required');
+assert.strictEqual(TSLib.reasonText('network'), '通信できませんでした / network error');
+assert.strictEqual(TSLib.reasonText('http_404'), 'サーバーに届きませんでした (http_404) / server unreachable (http_404)');
+assert.strictEqual(TSLib.reasonText('http_405'), 'サーバーに届きませんでした (http_405) / server unreachable (http_405)');
+assert.strictEqual(TSLib.reasonText('csrf'), 'csrf');
+assert.strictEqual(TSLib.reasonText('http_x'), 'http_x');
+assert.strictEqual(TSLib.reasonText(''), '');
+assert.strictEqual(TSLib.reasonText(undefined), '');
+const syncFailed = [{ id: 'f1', reason: 'forbidden_channel', at: 'x' }, { id: 'both', reason: 'invalid_record', at: 'x' }];
+assert.strictEqual(TSLib.recordSyncState('p1', ['p1', 'both'], syncFailed), 'pending');
+assert.strictEqual(TSLib.recordSyncState('f1', ['p1', 'both'], syncFailed), 'failed');
+assert.strictEqual(TSLib.recordSyncState('s1', ['p1', 'both'], syncFailed), 'sent');
+// 失敗後に直されて送り直し待ちなら未送信 / Edited after a failure and waiting to resend: pending
+assert.strictEqual(TSLib.recordSyncState('both', ['p1', 'both'], syncFailed), 'pending');
+assert.strictEqual(TSLib.recordSyncState('s1', undefined, undefined), 'sent');
 const u = TSLib.toUploadRecord({ id: 'y1', offset_sec: 61.2345, native: 'true', deleted: 0, created_at: '2026-01-01T00:00:00.000Z', by: 'x', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' });
 assert.strictEqual(u.timecode, '00:01:01'); assert.strictEqual(u.offset_sec, 61.235); assert.strictEqual(u.native, true); assert.strictEqual(u.deleted, false); assert.strictEqual(u.updated_at, u.created_at); assert.strictEqual(u.clock_skew_ms, 0);
 assert.deepStrictEqual(Object.keys(u), ['id', 'timecode', 'offset_sec', 'by', 'memo', 'native', 'channel', 'stream_id', 'started_at', 'created_at', 'updated_at', 'deleted', 'clock_skew_ms']);

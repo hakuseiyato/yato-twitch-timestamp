@@ -274,16 +274,74 @@ async function testRejectedReasonGoesToFailed() {
   assert.strictEqual(fc.storage.lastSync.failedCount, 1);
 }
 
-async function testClientErrorMovesBatchToFailed() {
+// 401 以外の 4xx は送信を止め、そのバッチと残りを pending に残す（失敗には移さない）
+// A non-401 4xx stops the upload and keeps that batch and the rest pending (nothing moves to failed).
+async function testClientErrorKeepsPending() {
   const fc = syncChrome({ records: [makeRecord('y0000001'), makeRecord('y0000002')], pending: ['y0000001', 'y0000002'] });
   const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL,
     respond: () => ({ status: 413, body: { error: 'too_many_records' } }) }]);
   const bg = loadBackground(fc, fetchImpl);
   const summary = await bg.uploadPending();
   assert.strictEqual(summary.error, 'too_many_records');
-  assert.deepStrictEqual(fc.storage.pending, []);
-  assert.deepStrictEqual(fc.storage.failed.map((f) => [f.id, f.reason]), [['y0000001', 'too_many_records'], ['y0000002', 'too_many_records']]);
+  assert.strictEqual(summary.rejected, 0);
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001', 'y0000002']);
+  assert.deepStrictEqual((await bg.readState()).failed, []);
   assert.strictEqual(fc.storage.lastSync.error, 'too_many_records');
+}
+
+// JSON の無い 404 は http_404。最初のバッチで止まり、別配信のバッチは送らない
+// A 404 without JSON gives http_404; it stops at the first batch, so the other stream's batch is not sent.
+async function testNotFoundStopsAndKeepsPending() {
+  const fc = syncChrome({ records: [makeRecord('y0000001', '999'), makeRecord('y0000002', '888')], pending: ['y0000001', 'y0000002'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: () => ({ status: 404, body: null }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'http_404');
+  assert.strictEqual(stampsCalls(fetchImpl).length, 1);
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001', 'y0000002']);
+  assert.deepStrictEqual((await bg.readState()).failed, []);
+  assert.strictEqual(fc.storage.lastSync.error, 'http_404');
+}
+
+// 403 {error:'csrf'} はそのコードを lastSync.error に残す / A 403 {error:'csrf'} keeps that code in lastSync.error
+async function testForbiddenCsrfKeepsPending() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: () => ({ status: 403, body: { error: 'csrf' } }) }]);
+  const bg = loadBackground(fc, fetchImpl);
+  await bg.uploadPending();
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+  assert.deepStrictEqual((await bg.readState()).failed, []);
+  assert.strictEqual(fc.storage.lastSync.error, 'csrf');
+}
+
+// 送信中に別トークンで再ログインされたら、古いトークンの 401 で expired を立てない
+// When auth is replaced by another token during the upload, the old token's 401 does not set expired.
+async function testUnauthorizedWithReplacedTokenKeepsAuth() {
+  const fc = syncChrome({ records: [makeRecord('y0000001')], pending: ['y0000001'] });
+  const fetchImpl = fakeFetch([{ match: (u) => u === STAMPS_URL, respond: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fc.storage.auth = { token: 'tokB', login: 'mod1', userId: '1' };
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { status: 401, body: { error: 'unauthorized' } };
+  } }]);
+  const bg = loadBackground(fc, fetchImpl);
+  const summary = await bg.uploadPending();
+  assert.strictEqual(summary.error, 'unauthorized');
+  assert.strictEqual(stampsCalls(fetchImpl)[0].init.headers.Authorization, 'Bearer tok');
+  assert.deepStrictEqual(fc.storage.auth, { token: 'tokB', login: 'mod1', userId: '1' });
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
+}
+
+// 失敗一覧を消す / Clearing the failure list
+async function testClearFailed() {
+  const fc = syncChrome({
+    records: [makeRecord('y0000001')], pending: ['y0000001'],
+    failed: [{ id: 'y0000002', reason: 'forbidden_channel', at: '2026-10-30T09:00:00Z' }]
+  });
+  const bg = loadBackground(fc, fakeFetch([]));
+  await bg.handleMessage({ type: 'clearFailed' });
+  assert.deepStrictEqual(fc.storage.failed, []);
+  assert.deepStrictEqual(fc.storage.pending, ['y0000001']);
 }
 
 async function testServerErrorKeepsPending() {
@@ -473,7 +531,11 @@ async function testDeleteStreamIsLocalOnly() {
   await testStaleIsSuccess();
   await testUnauthorizedMarksExpiredAndLoginResends();
   await testRejectedReasonGoesToFailed();
-  await testClientErrorMovesBatchToFailed();
+  await testClientErrorKeepsPending();
+  await testNotFoundStopsAndKeepsPending();
+  await testForbiddenCsrfKeepsPending();
+  await testUnauthorizedWithReplacedTokenKeepsAuth();
+  await testClearFailed();
   await testServerErrorKeepsPending();
   await testLargeQueueIsSplitInto500();
   await testNoServerUrlSendsNothing();
