@@ -63,7 +63,7 @@ The extension and the panel have no external libraries, package manager, or buil
 - `service/src/chat.ts`: streams the uploaded chat JSON into R2 without parsing it and serves it back
 - `service/web/`: pages `index.html` (stream list), `auth/callback.html`, `s.html` (stream page), `comments.html` (detached comment list), `me.html`, `admin.html`, and `css/app.css`
 - `service/web/js/`: `api.js` (API calls and sign-in), `chat-fetch.js` (Twitch GraphQL chat fetch and shaping), `bins.js` (binning and time shift), `graph.js` (canvas graph), page scripts, and `lib.js` (copy of `panel/js/lib.js` made by `npm run build:web`)
-- `service/test/`: Worker tests run by `npm test`; `fixtures/gql_comments_page.json` is one chat page from a real public VOD
+- `service/test/`: Worker tests run by `npm test`; `fixtures/gql_comments_page.json` is a synthetic chat page in the shape of a real Twitch GraphQL response
 - `tests/test_service_web.js`: dependency-free Node tests for the pure logic in `service/web/js`
 
 The former standalone After Effects CSV importer is removed. Both Adobe hosts now use the same panel, sync file, and synchronization model.

@@ -20,11 +20,11 @@ assert.strictEqual(Bins.binIndex(59.9, 30), 1);
 // コメント整形 / Comment normalisation
 const nodes = page[0].data.video.comments.edges.map(e => e.node);
 const c = Chat.normalizeComment(nodes[1]);
-assert.strictEqual(c[0], 66); assert.strictEqual(c[1], 'frozencoola'); assert.strictEqual(c[2], 'FROZENCOOLA'); assert.ok(c[3].length > 0);
+assert.strictEqual(c[0], 66); assert.strictEqual(c[1], 'viewer_b'); assert.strictEqual(c[2], 'Viewer_B'); assert.ok(c[3].length > 0);
 assert.strictEqual(c.length, 4);
 assert.strictEqual(Chat.normalizeComment({ ...nodes[0], commenter: null })[1], '');
 assert.strictEqual(Chat.normalizeComment({ ...nodes[0], commenter: null })[2], '');
-assert.strictEqual(Chat.normalizeComment(nodes[0])[3], 'Sery_Bot は seryboArrive です');
+assert.strictEqual(Chat.normalizeComment(nodes[0])[3], 'こんにちは / hello emoteA です');
 assert.strictEqual(Chat.normalizeComment({ ...nodes[0], message: undefined }), null);
 const parsed = Chat.parseCommentsPage(page);
 assert.strictEqual(parsed.comments.length, 3);

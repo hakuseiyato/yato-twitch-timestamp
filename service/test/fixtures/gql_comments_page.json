@@ -2,11 +2,11 @@
  {
   "data": {
    "video": {
-    "id": "2913861877",
+    "id": "1000000001",
     "creator": {
-     "id": "783841860",
+     "id": "100000000",
      "channel": {
-      "id": "783841860",
+      "id": "100000000",
       "__typename": "Channel"
      },
      "__typename": "User"
@@ -14,13 +14,13 @@
     "comments": {
      "edges": [
       {
-       "cursor": "eyJpZCI6Ijk4YzgyOTU2LWQ0NzMtNGYyOS1iOWNmLTMyMjY3ZTI5ODIxZiIsImhrIjoiYnJvYWRjYXN0OjMxNjcxMDY3MDQ1MSIsInNrIjoiQUFBQTA3b2pya0FZNHY2Rl9DRHJRQSJ9",
+       "cursor": "Y3Vyc29yMQ==",
        "node": {
-        "id": "c9f22d89-1062-4ff6-8fb5-cb273331a5df",
+        "id": "00000000-0000-4000-8000-000000000001",
         "commenter": {
-         "id": "402337290",
-         "login": "sery_bot",
-         "displayName": "Sery_Bot",
+         "id": "100000001",
+         "login": "viewer_a",
+         "displayName": "Viewer_A",
          "__typename": "User"
         },
         "contentOffsetSeconds": 13,
@@ -29,17 +29,17 @@
          "fragments": [
           {
            "emote": null,
-           "text": "Sery_Bot は ",
+           "text": "こんにちは / hello ",
            "__typename": "VideoCommentMessageFragment"
           },
           {
            "emote": {
-            "id": "emotesv2_a4648bf8dbbd4b8380c59c8c761427c1;13;24",
-            "emoteID": "emotesv2_a4648bf8dbbd4b8380c59c8c761427c1",
-            "from": 13,
+            "id": "emotesv2_00000000000000000000000000000001;14;19",
+            "emoteID": "emotesv2_00000000000000000000000000000001",
+            "from": 14,
             "__typename": "EmbeddedEmote"
            },
-           "text": "seryboArrive",
+           "text": "emoteA",
            "__typename": "VideoCommentMessageFragment"
           },
           {
@@ -70,13 +70,13 @@
        "__typename": "VideoCommentEdge"
       },
       {
-       "cursor": "eyJpZCI6Ijk4YzgyOTU2LWQ0NzMtNGYyOS1iOWNmLTMyMjY3ZTI5ODIxZiIsImhrIjoiYnJvYWRjYXN0OjMxNjcxMDY3MDQ1MSIsInNrIjoiQUFBQTA3b2pya0FZNHY2Rl9DRHJRQSJ9",
+       "cursor": "Y3Vyc29yMg==",
        "node": {
-        "id": "e8b7f8c6-bae6-4477-a85e-eb57011aa06f",
+        "id": "00000000-0000-4000-8000-000000000002",
         "commenter": {
-         "id": "626195991",
-         "login": "frozencoola",
-         "displayName": "FROZENCOOLA",
+         "id": "100000002",
+         "login": "viewer_b",
+         "displayName": "Viewer_B",
          "__typename": "User"
         },
         "contentOffsetSeconds": 66,
@@ -85,7 +85,7 @@
          "fragments": [
           {
            "emote": null,
-           "text": "てらーのの雑談きたー！！",
+           "text": "草",
            "__typename": "VideoCommentMessageFragment"
           }
          ],
@@ -105,13 +105,13 @@
        "__typename": "VideoCommentEdge"
       },
       {
-       "cursor": "eyJpZCI6Ijk4YzgyOTU2LWQ0NzMtNGYyOS1iOWNmLTMyMjY3ZTI5ODIxZiIsImhrIjoiYnJvYWRjYXN0OjMxNjcxMDY3MDQ1MSIsInNrIjoiQUFBQTA3b2pya0FZNHY2Rl9DRHJRQSJ9",
+       "cursor": "Y3Vyc29yMw==",
        "node": {
-        "id": "1171a2ca-93a5-4647-a280-a8ad83e70d29",
+        "id": "00000000-0000-4000-8000-000000000003",
         "commenter": {
-         "id": "700723117",
-         "login": "oyasumi_777888",
-         "displayName": "歐壓斯咪",
+         "id": "100000003",
+         "login": "viewer_c",
+         "displayName": "Viewer_C",
          "__typename": "User"
         },
         "contentOffsetSeconds": 103,
@@ -120,7 +120,7 @@
          "fragments": [
           {
            "emote": null,
-           "text": "歐壓斯咪 subscribed at Tier 1. They've subscribed for 18 months, currently on a 18 month streak! 18",
+           "text": "おつ〜",
            "__typename": "VideoCommentMessageFragment"
           }
          ],

@@ -33,7 +33,7 @@ npx wrangler r2 bucket create yts-chat
 
 `wrangler.jsonc` の `vars.TWITCH_CLIENT_ID` に Twitch アプリの Client ID を書く。implicit grant の Client ID は認可 URL に載る公開値なので、secret ではなく `vars` に置いている（設計書 §5 は secret と書くが、コードは `vars`）。
 
-最初のサイト管理者にする Twitch login を secret に入れる（対話で値を聞かれる）。
+最初のサイト管理者にする Twitch login を secret に入れる（対話で値を聞かれる）。値は Twitch の login を小文字で入れる（比較は完全一致。Twitch の login は常に小文字）。
 
 ```sh
 npx wrangler secret put BOOTSTRAP_LOGIN
@@ -65,6 +65,7 @@ npm run dev
 
 - ローカルの DB を作り直すときは `.wrangler/state` を消してから migrate し直す。
   `migrations/0001_init.sql` は本番 deploy 前に直接書き換えている。wrangler は適用済みの migration をファイル名で記録するので、古い版を適用済みのローカル DB には書き換えが反映されない。
+  本番に初めて deploy した後は `migrations/0001_init.sql` を二度と書き換えず、変更は `migrations/0002_<name>.sql` のように新しいファイルで足す（wrangler は migration をファイル名ごとに 1 回だけ適用する）。
 
   ```sh
   rm -rf .wrangler/state

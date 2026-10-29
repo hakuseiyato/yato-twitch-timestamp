@@ -38,6 +38,8 @@ export function registerChatRoutes(router: Router): void {
     const length = ctx.request.headers.get('content-length');
     if (length === null) return error(411, 'length_required');
     if (!NON_NEGATIVE_INT.test(length)) return error(400, 'bad_request');
+    // 空の本文は保存しない / An empty body is not stored
+    if (Number(length) === 0) return error(400, 'empty_body');
     if (Number(length) > CHAT_MAX_BYTES) return error(413, 'payload_too_large');
     const count = optionalCount(params.get('count'));
     // length_sec は検査だけ（保存する列は無い）/ length_sec is validated only (there is no column for it)

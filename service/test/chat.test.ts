@@ -79,6 +79,17 @@ describe('chat', () => {
     expect(await chatObjects('ch_d')).toEqual([]);
   });
 
+  it('PUT with Content-Length 0 is 400 empty_body and writes nothing', async () => {
+    await seedChannel('ch_h', 'owner_ch');
+    await seedStream({ stream_id: '70008', channel: 'ch_h' });
+    const res = await put('owner_ch', '/api/streams/70008/chat?vod_id=777008&count=0', '', { 'content-length': '0' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'empty_body' });
+    expect(await chatObjects('ch_h')).toEqual([]);
+    const stream = await env.DB.prepare('SELECT * FROM streams WHERE stream_id = ?').bind('70008').first<StreamRow>();
+    expect(stream?.chat_key).toBeNull();
+  });
+
   it('bad vod_id, count or length_sec is 400; unknown stream is 404', async () => {
     await seedChannel('ch_e', 'owner_ce');
     await seedStream({ stream_id: '70005', channel: 'ch_e' });

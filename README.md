@@ -155,7 +155,7 @@ The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves r
 
 The Chrome extension and the Adobe panel do not talk to the service yet; sending stamps from the extension and synchronizing the panel with the service are planned as follow-ups. Today the service is used through its web pages, and the CSV sync file workflow above is unchanged.
 
-See [`service/README.md`](service/README.md) (Japanese) for setup, local development, tests, and operations. The test fixture `service/test/fixtures/gql_comments_page.json` is one page of chat replay taken from a real public Twitch VOD, so it contains public chat messages and the commenters' Twitch logins.
+See [`service/README.md`](service/README.md) (Japanese) for setup, local development, tests, and operations. The test fixture `service/test/fixtures/gql_comments_page.json` is a synthetic page in the shape of a real Twitch GraphQL chat replay response; its logins, ids and messages are made up.
 
 ## Limitations
 
