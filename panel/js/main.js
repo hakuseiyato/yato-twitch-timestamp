@@ -101,6 +101,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let serverLogin = '';
   let serverStreams = [];
   let serverMirrorCache = { path: null, value: false };
+  // 直前の pull でサーバーにあった id → updated_at（同じものは push しない） / id → updated_at the server had at the last pull (not pushed back)
+  let serverPulled = { path: '', byId: new Map() };
+  // pull の結果を同期の完了メッセージに添える / The pull result, added to the sync's completion message
+  let serverSyncNote = '';
 
   thumbnailVideo.muted = true;
   thumbnailVideo.preload = 'auto';
@@ -1656,7 +1660,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       now: state.now,
       choices: choices,
       addUntagged: state.addUntagged,
-      hostName: hostApp === 'PPRO' ? 'premiere' : 'ae'
+      hostName: newRecordBy(state.path)
     });
     renderPreview();
   }
@@ -1787,7 +1791,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       now: previewState.now,
       choices: choices,
       addUntagged: previewState.addUntagged,
-      hostName: hostApp === 'PPRO' ? 'premiere' : 'ae'
+      hostName: newRecordBy(previewState.path)
     });
     return previewState;
   }
@@ -1893,12 +1897,17 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       records.forEach(function (record) {
         if (record.id) csvById.set(record.id, record);
       });
+      // サーバーの鏡なら、書き戻した CSV の変更をサーバーへ送る（失敗しても同期自体は済んでいる）
+      // For a server mirror, send the written-back CSV's changes to the server (a failure does not undo the sync).
+      const pushed = isServerMirror(state.path) ? await pushFromMirror(state.path) : { note: '', failed: false };
       const counts = changeCounts(state.plan);
       const successMessage = state.plan.preview.length === 0 ? '変更はありません' :
         '同期しました（アプリ ' + Number(applyResult.applied || 0) + ' / CSV ' + counts.csv +
         (failed.length ? ' / 失敗 ' + failed.length + ' 件' : '') +
         (nudged.length ? ' / 位置調整 ' + nudged.length + ' 件' : '') + '）' + relistWarning;
-      setStatus(successMessage, 'ok');
+      const serverNotes = [serverSyncNote, pushed.note].filter(Boolean);
+      serverSyncNote = '';
+      setStatus([successMessage].concat(serverNotes).join(' / '), pushed.failed ? 'error' : 'ok');
       previewState = null;
       choices = {};
       elements.warnings.textContent = '';
@@ -1917,6 +1926,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     invalidatePreview();
     setBusy(true);
     try {
+      // サーバーの鏡は先にサーバーの変更を取り込む。取り込めなければ同期しない（手元だけで同期すると衝突の判断が狂う）
+      // A server mirror first takes in the server's changes; without them the sync stops (a local-only sync would misjudge conflicts).
+      serverSyncNote = '';
+      if (isServerMirror(csvFilePath) && !(await pullIntoMirror(csvFilePath))) return;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const state = await computePreview();
         const plan = state.plan;
@@ -1987,7 +2000,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     try {
       await callHost('ytsAddMarker(' + hostLiteral({
         id: TSLib.newId(),
-        by: hostApp === 'PPRO' ? 'premiere' : 'ae',
+        by: newRecordBy(csvFilePath),
         targetId: String(activeInfo.targetId || '')
       }) + ')', true);
       setStatus('マーカーを追加しました', 'ok');
@@ -2050,6 +2063,103 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     if (!csvPath) return false;
     if (serverMirrorCache.path !== csvPath) serverMirrorCache = { path: csvPath, value: !!readServerMeta(csvPath) };
     return serverMirrorCache.value;
+  }
+
+  // 新しく作る記録の by。サーバーの鏡なら接続した人の login、それ以外はアプリ名
+  // The `by` of newly created records: the connected login for a server mirror, the app name otherwise.
+  function newRecordBy(csvPath) {
+    const meta = isServerMirror(csvPath) ? readServerMeta(csvPath) : null;
+    return (meta && meta.me) || (hostApp === 'PPRO' ? 'premiere' : 'ae');
+  }
+
+  // 鏡 CSV と今のサーバー設定が同じサーバーか（別のサーバーへ同じ stream_id を送らない）
+  // Whether the mirror CSV and the current server settings point at the same server (never send a stream_id to another server).
+  function assertMirrorServer(meta) {
+    const settings = YTSServer.loadSettings();
+    if (settings.serverUrl && settings.serverUrl !== meta.serverUrl) {
+      throw new Error('この鏡 CSV は別のサーバー（' + meta.serverUrl + '）のものです。「サーバー」で接続し直してください / ' +
+        'This mirror CSV belongs to another server (' + meta.serverUrl + '). Reconnect with "サーバー"');
+    }
+  }
+
+  // 同期の前にサーバーの記録を鏡 CSV へ取り込む。失敗したら状態欄に出して false（同期を中止する）
+  // Before a sync, merges the server's records into the mirror CSV. On failure shows it and returns false (the sync stops).
+  async function pullIntoMirror(csvPath) {
+    try {
+      const meta = readServerMeta(csvPath);
+      if (!meta) throw new Error('鏡 CSV の情報（.server.json）を読めません / Cannot read the mirror info (.server.json)');
+      assertMirrorServer(meta);
+      const serverRecords = await YTSServer.pullStamps(meta.stream_id);
+      const parsed = TSLib.parseCsv(readText(csvPath));
+      if (Number(parsed.skipped) > 0) {
+        throw new Error('読めない行があります: ' + parsed.skippedRows.join(', ') + ' 行目（offset_sec / timecode を確認してください）');
+      }
+      // 直前の push で forbidden_tombstone だった id は、サーバーの生存記録で戻す / Ids rejected as forbidden_tombstone come back from the server
+      const forceIds = Array.isArray(meta.forcePull) ? meta.forcePull : [];
+      const merged = TSLib.mergeServerRecords(parsed.records, serverRecords, { forceIds: forceIds });
+      if (merged.changed > 0) atomicWrite(csvPath, TSLib.toCsv(merged.records));
+      serverPulled = {
+        path: csvPath,
+        byId: new Map(serverRecords.map(function (record) {
+          const normalized = TSLib.normalizeRecord(record);
+          return [normalized.id, normalized.updated_at];
+        }))
+      };
+      const nextMeta = Object.assign({}, meta, { lastPullAt: new Date().toISOString() });
+      delete nextMeta.forcePull;
+      writeServerMeta(csvPath, nextMeta);
+      if (merged.changed > 0) {
+        serverSyncNote = 'サーバーから ' + merged.changed + ' 件取り込み / pulled ' + merged.changed;
+        setStatus(serverSyncNote, 'ok');
+      }
+      return true;
+    } catch (error) {
+      setStatus('サーバーから取り込めないため同期を中止しました / Sync stopped: could not pull from the server: ' + messageOf(error), 'error');
+      return false;
+    }
+  }
+
+  // 同期の後に、前回の push より後に変わった記録をサーバーへ送る。返り値 {note, failed} は完了メッセージに添える
+  // lastPushAt は push の開始時刻（送信中の編集を次回に回す）。throw したら進めない（次回まとめて送り直す）
+  // After a sync, sends records changed since the last push. The returned {note, failed} goes into the completion message.
+  // lastPushAt becomes the push start time (edits made during the push go next time); it stays put after a throw (all resent next time).
+  async function pushFromMirror(csvPath) {
+    const startedAt = new Date().toISOString();
+    let meta = readServerMeta(csvPath);
+    if (!meta) return { note: '', failed: false };
+    let result = null;
+    let pushError = null;
+    try {
+      assertMirrorServer(meta);
+      // 直前の pull でサーバーにあったものと同じ記録は送らない（他人の墓標を送り返して拒否されないように）
+      // Records identical to what the last pull returned are not sent back (so others' tombstones are not bounced as rejections).
+      const pulled = serverPulled.path === csvPath ? serverPulled.byId : new Map();
+      const toPush = TSLib.recordsToPush(TSLib.parseCsv(readText(csvPath)).records, meta.lastPushAt)
+        .filter(function (record) { return pulled.get(record.id) !== record.updated_at; });
+      if (!toPush.length) return { note: '', failed: false };
+      result = await YTSServer.pushStamps(toPush);
+    } catch (error) {
+      pushError = error;
+      result = error && error.partial ? error.partial : null;
+    }
+    const sorted = TSLib.applyPanelPushResult(result);
+    meta = readServerMeta(csvPath) || meta;
+    const nextMeta = Object.assign({}, meta, { lastPushAt: TSLib.nextPushAt(pushError || result, startedAt, meta.lastPushAt) });
+    const forcePull = Array.from(new Set((Array.isArray(meta.forcePull) ? meta.forcePull : []).concat(sorted.forcePull)));
+    if (forcePull.length) nextMeta.forcePull = forcePull;
+    try {
+      writeServerMeta(csvPath, nextMeta);
+    } catch (error) {
+      pushError = pushError || error;
+    }
+    const notes = [];
+    if (sorted.okIds.length) notes.push('サーバーへ ' + sorted.okIds.length + ' 件送信 / pushed ' + sorted.okIds.length);
+    if (sorted.failed.length) {
+      const reasons = Array.from(new Set(sorted.failed.map(function (item) { return TSLib.reasonText(item.reason); })));
+      notes.push('送れなかった ' + sorted.failed.length + ' 件: ' + reasons.join('、') + ' / failed ' + sorted.failed.length);
+    }
+    if (pushError) notes.push('サーバーへの送信は次回に再試行 / push will retry: ' + messageOf(pushError));
+    return { note: notes.join(' / '), failed: !!pushError || sorted.failed.length > 0 };
   }
 
   function selectedServerStream() {
@@ -2187,11 +2297,17 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
     closeServerPopover();
     await loadCsvPath(mirrorPath, true);
+    let opened = '';
     if (csvFilePath === mirrorPath && groups.length) {
-      setStatus('サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
-        merged.changed + ' merged）', 'ok');
+      opened = 'サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
+        merged.changed + ' merged）';
+      setStatus(opened, 'ok');
     }
     await refreshMarkers();
+    // 「CSV」で開いたときと同じく、未紐付けなら紐付けてそのまま同期する（初回は確認の引き出しで止まる）
+    // As with opening via "CSV": link if not linked yet and sync right away (the first sync stops at the confirm drawer).
+    if (!samePath(csvFilePath, mirrorPath)) return;
+    if (!(await autoLinkAndSync(opened)) && opened) setStatus(opened, 'ok');
   }
 
   function openServerPopover() {

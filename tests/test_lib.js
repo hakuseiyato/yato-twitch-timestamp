@@ -1034,6 +1034,38 @@ assert.strictEqual(TSLib.frameFileName(5, 30, 'x'.repeat(80)), '00-00-05-00_' + 
   const keep = TSLib.mergeServerRecords([{ id: 'y00000aa', memo: 'mine', updated_at: '2026-01-03T00:00:00.000Z' }], [{ id: 'y00000aa', memo: 'new', updated_at: '2026-01-02T00:00:00.000Z' }]);
   assert.strictEqual(keep.records[0].memo, 'mine'); assert.strictEqual(keep.changed, 0);
   assert.strictEqual(TSLib.isServerMeta({ serverUrl: 'https://h', stream_id: 's', channel: 'c' }), true); assert.strictEqual(TSLib.isServerMeta({}), false);
+
+  // forceIds: 直前の push で forbidden_tombstone になった id は、ローカルの墓標が新しくてもサーバーの生存記録で上書き
+  // forceIds: ids rejected as forbidden_tombstone by the last push take the server's live record even over a newer local tombstone.
+  const tomb = [{ id: 'y00000aa', memo: 'x', offset_sec: 5, deleted: true, updated_at: '2026-01-05T00:00:00.000Z' }];
+  const live = [{ id: 'y00000aa', memo: 'theirs', offset_sec: 5, deleted: false, updated_at: '2026-01-02T00:00:00.000Z' }];
+  const noForce = TSLib.mergeServerRecords(tomb, live);
+  assert.strictEqual(noForce.records[0].deleted, true); assert.strictEqual(noForce.changed, 0);
+  const forced = TSLib.mergeServerRecords(tomb, live, { forceIds: ['y00000aa'] });
+  assert.strictEqual(forced.records.length, 1);
+  assert.strictEqual(forced.records[0].deleted, false); assert.strictEqual(forced.records[0].memo, 'theirs');
+  assert.strictEqual(forced.records[0].updated_at, '2026-01-02T00:00:00.000Z'); assert.strictEqual(forced.changed, 1);
+  // サーバーも墓標なら戻すものは無い / Nothing to restore when the server also has a tombstone
+  const bothDead = TSLib.mergeServerRecords(tomb, [Object.assign({}, live[0], { deleted: true })], { forceIds: ['y00000aa'] });
+  assert.strictEqual(bothDead.records[0].deleted, true); assert.strictEqual(bothDead.changed, 0);
+  // ローカルが生存（墓標でない）なら通常の updated_at 勝ち / A live local record follows the usual newer-wins rule
+  const localLive = TSLib.mergeServerRecords([Object.assign({}, tomb[0], { deleted: false, memo: 'mine' })], live, { forceIds: ['y00000aa'] });
+  assert.strictEqual(localLive.records[0].memo, 'mine'); assert.strictEqual(localLive.changed, 0);
+  // forceIds に無い id には効かない / Ids not in forceIds are unaffected
+  assert.strictEqual(TSLib.mergeServerRecords(tomb, live, { forceIds: ['y00000ff'] }).records[0].deleted, true);
+
+  // nextPushAt: 応答が揃えば push 開始時刻へ進め、throw（retryable でもそうでなくても）なら前の値のまま
+  // nextPushAt: advances to the push start time on a full response; keeps the previous value when the push threw (retryable or not).
+  const started = '2026-01-10T00:00:00.000Z';
+  const previous = '2026-01-01T00:00:00.000Z';
+  assert.strictEqual(TSLib.nextPushAt({ accepted: ['a'], rejected: [] }, started, previous), started);
+  // 記録ごとの拒否（stale・forbidden_*）は再送しないので進める / Per-record rejections are not resent, so it advances
+  assert.strictEqual(TSLib.nextPushAt({ accepted: [], rejected: [{ id: 'b', reason: 'forbidden_tombstone' }, { id: 'c', reason: 'stale' }] }, started, previous), started);
+  const retry = Object.assign(new Error('503'), { retryable: true, partial: { accepted: ['a'], rejected: [] } });
+  assert.strictEqual(TSLib.nextPushAt(retry, started, previous), previous);
+  const denied = Object.assign(new Error('401'), { retryable: false, status: 401, partial: { accepted: [], rejected: [] } });
+  assert.strictEqual(TSLib.nextPushAt(denied, started, previous), previous);
+  assert.strictEqual(TSLib.nextPushAt(null, started, ''), '');
 }
 
 // ExtendScript's $.evalFile decodes BOM-less files with the system code page (cp932) and fails on UTF-8 Japanese.

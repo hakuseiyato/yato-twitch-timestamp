@@ -557,8 +557,21 @@ const TSLib = (function () {
 
   // サーバーの記録を鏡 CSV の記録に取り込む（updated_at が新しい方が勝つ）。changed は追加 + 更新の件数
   // Merges server records into the mirror's records (newer updated_at wins); changed counts additions and updates.
-  function mergeServerRecords(localRecords, serverRecords) {
-    const records = mergeRecords(localRecords || [], serverRecords || []);
+  // opts.forceIds: ローカルが墓標・サーバーが生存なら、墓標の方が新しくてもサーバーの記録にする（直前の push で forbidden_tombstone だった id）
+  // opts.forceIds: when local is a tombstone and the server's record is live, take the server's even if the tombstone is newer
+  // (ids rejected as forbidden_tombstone by the last push).
+  function mergeServerRecords(localRecords, serverRecords, opts) {
+    const force = new Set((opts && opts.forceIds) || []);
+    let base = localRecords || [];
+    if (force.size) {
+      const serverLive = new Set(mergeRecords(serverRecords || []).filter(function (record) { return !record.deleted; })
+        .map(function (record) { return record.id; }));
+      const drop = new Set(mergeRecords(base).filter(function (record) {
+        return record.deleted && force.has(record.id) && serverLive.has(record.id);
+      }).map(function (record) { return record.id; }));
+      base = base.filter(function (record) { return !drop.has(normalizeRecord(record).id); });
+    }
+    const records = mergeRecords(base, serverRecords || []);
     const localById = new Map();
     (localRecords || []).forEach(function (record) {
       const normalized = normalizeRecord(record);
@@ -570,6 +583,30 @@ const TSLib = (function () {
       if (!local || local.updated_at !== record.updated_at) changed += 1;
     });
     return { records: records, changed: changed };
+  }
+
+  // パネルの push 結果を振り分ける。accepted と stale は成功、他の rejected は失敗、forbidden_tombstone は次の pull でサーバーの記録に戻す
+  // Sorts a panel push result: accepted and stale succeed, other rejections fail, forbidden_tombstone ids are restored from the server on the next pull.
+  function applyPanelPushResult(result) {
+    const res = result || {};
+    const applied = applyUploadResult([], [], null, res);
+    const okIds = (res.accepted || []).concat((res.rejected || []).filter(function (item) { return item.reason === 'stale'; })
+      .map(function (item) { return item.id; }));
+    return {
+      okIds: okIds,
+      failed: applied.failed.map(function (item) { return { id: item.id, reason: item.reason }; }),
+      forcePull: applied.failed.filter(function (item) { return item.reason === 'forbidden_tombstone'; })
+        .map(function (item) { return item.id; })
+    };
+  }
+
+  // 次の lastPushAt。応答が揃った（throw しなかった）ときだけ push の開始時刻へ進める（送信中の編集を取りこぼさない）。
+  // throw したら retryable でもそうでなくても前の値のまま（次回まとめて送り直す。届いていた分は stale で返る）
+  // The next lastPushAt: advance to the push start time only when a full response came back (edits made during the push are not skipped).
+  // After a throw, retryable or not, keep the previous value (everything is resent next time; what already arrived comes back as stale).
+  function nextPushAt(result, startedAtIso, previousIso) {
+    const ok = !!result && Array.isArray(result.accepted) && Array.isArray(result.rejected);
+    return ok ? startedAtIso : (previousIso || '');
   }
 
   // 鏡 CSV の横に置く <stream_id>.server.json の形か / Whether obj has the shape of a mirror's <stream_id>.server.json
@@ -1231,6 +1268,8 @@ const TSLib = (function () {
     serverMirrorPath: serverMirrorPath,
     recordsToPush: recordsToPush,
     mergeServerRecords: mergeServerRecords,
+    applyPanelPushResult: applyPanelPushResult,
+    nextPushAt: nextPushAt,
     isServerMeta: isServerMeta
   };
 }());

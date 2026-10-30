@@ -199,6 +199,26 @@ const tokenSettings = JSON.stringify({ serverUrl: 'https://h.example', token: 'y
     assert.strictEqual(storage.items['yts.server'], tokenSettings);
   }
 
+  // push の結果の振り分け: accepted と stale は成功、他は失敗一覧、forbidden_tombstone は次の pull で戻す
+  // Sorting a push result: accepted and stale succeed, the rest are failures, forbidden_tombstone ids are restored by the next pull.
+  {
+    const TSLib = require('../panel/js/lib.js');
+    const sorted = TSLib.applyPanelPushResult({
+      accepted: ['y00000a1', 'y00000a2'],
+      rejected: [
+        { id: 'y00000b1', reason: 'stale' },
+        { id: 'y00000c1', reason: 'forbidden_tombstone' },
+        { id: 'y00000d1', reason: 'invalid_time' }
+      ]
+    });
+    assert.deepStrictEqual(sorted.okIds, ['y00000a1', 'y00000a2', 'y00000b1']);
+    assert.deepStrictEqual(sorted.failed, [{ id: 'y00000c1', reason: 'forbidden_tombstone' }, { id: 'y00000d1', reason: 'invalid_time' }]);
+    assert.deepStrictEqual(sorted.forcePull, ['y00000c1']);
+    // 空・欠けた応答（throw 時の partial が無い等）でも落ちない / Empty or missing results (e.g. no partial on a throw) do not crash
+    assert.deepStrictEqual(TSLib.applyPanelPushResult(null), { okIds: [], failed: [], forcePull: [] });
+    assert.deepStrictEqual(TSLib.applyPanelPushResult({ accepted: [], rejected: [] }), { okIds: [], failed: [], forcePull: [] });
+  }
+
   // CEP で lib.js が読めず require も無いときも、server.js の読み込み自体は失敗しない（main.js の案内を出せるように）
   // In CEP with lib.js missing and no require, loading server.js itself must not throw (so main.js can show its notice).
   {
