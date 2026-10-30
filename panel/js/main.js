@@ -252,8 +252,14 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     setBusy(true);
     try {
       const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, binName: 'Peakaboo_Shorts', prefix: 'Short_' }) + ')', true);
-      setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件は範囲外' : '') +
-        ' / Created ' + out.created + ' sequences (Peakaboo_Shorts)' + (out.skipped ? ', ' + out.skipped + ' out of range' : ''), out.created ? 'ok' : '');
+      // skipped = 範囲が取れない、または Sequence を作れなかったマーカー / skipped = markers with no usable range or whose sequence could not be created
+      if (!out.created) {
+        setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : '') +
+          ' / No candidate markers' + (out.skipped ? ' (' + out.skipped + ' skipped)' : ''), '');
+      } else {
+        setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : '') +
+          ' / Created ' + out.created + ' sequences (Peakaboo_Shorts)' + (out.skipped ? ', ' + out.skipped + ' skipped' : ''), 'ok');
+      }
       closeShortsPopover();
     } catch (error) { setStatus(messageOf(error), 'error'); } finally { setBusy(false); }
   }

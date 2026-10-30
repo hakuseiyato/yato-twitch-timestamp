@@ -739,6 +739,7 @@ function ytsCreateShorts(p) {
     var origOut = NaN;
     var result;
     var restoreError = null;
+    var touched = false;
     var preSec;
     var postSec;
     var binName;
@@ -800,11 +801,18 @@ function ytsCreateShorts(p) {
                 n += 1;
                 name = ytsShortName(targets[i].name, n);
             }
+            // In を 2 回置くのは、前の Out より後ろの In が弾かれないようにするため
+            // In is set twice so a new In past the previous Out is not rejected.
+            touched = true;
             seq.setInPoint(toTime(inSec));
             seq.setOutPoint(toTime(outSec));
+            seq.setInPoint(toTime(inSec));
             // true = トラックのターゲット指定を無視して全トラックを含める / true = ignore track targeting and include every track
             sub = seq.createSubsequence(true);
-            if (!sub || typeof sub !== "object") throw new Error("createSubsequence");
+            if (!sub || typeof sub !== "object") {
+                skipped += 1;
+                continue;
+            }
             sub.name = name;
             usedNames["n_" + name] = true;
             names.push(name);
@@ -837,9 +845,9 @@ function ytsCreateShorts(p) {
     } catch (e) {
         result = "ERR|" + created + " 件作成後に失敗 / Failed after creating " + created + ": " + e.toString();
     } finally {
-        // In と Out の両方が読めたときだけ戻す。In を 2 回置くのは、途中の In/Out と前後が入れ替わって弾かれるのを避けるため
-        // Restore only when both In and Out were read. In is set twice so a reversed intermediate In/Out order cannot reject it.
-        if (isFinite(origIn) && origIn >= 0 && isFinite(origOut) && origOut > 0) {
+        // In/Out を一度でも動かし、かつ元の In と Out の両方が読めたときだけ戻す。In を 2 回置くのは、途中の In/Out と前後が入れ替わって弾かれるのを避けるため
+        // Restore only when this run moved In/Out and both originals were read. In is set twice so a reversed intermediate order cannot reject it.
+        if (touched && isFinite(origIn) && origIn >= 0 && isFinite(origOut) && origOut > 0) {
             try {
                 seq.setInPoint(toTime(origIn));
                 seq.setOutPoint(toTime(origOut));
