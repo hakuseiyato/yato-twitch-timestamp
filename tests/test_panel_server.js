@@ -232,6 +232,15 @@ const tokenSettings = JSON.stringify({ serverUrl: 'https://h.example', token: 'y
     await assert.rejects(context.window.YTSServer.pushStamps(makeRecords(1)), /lib\.js を読み込めませんでした。panel\\install\.ps1 を再実行してください$/);
   }
 
+  // パネルの CSP がサーバー（https）への fetch を許す。connect-src が無いと default-src 'self' に落ちて CEF が全要求を拒む
+  // The panel CSP must allow fetch to the https server. Without connect-src, default-src 'self' applies and CEF refuses every request
+  const indexHtml = fs.readFileSync(path.resolve(__dirname, '../panel/html/index.html'), 'utf8');
+  const cspMatch = indexHtml.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/);
+  assert.ok(cspMatch, 'index.html has a Content-Security-Policy meta');
+  const connectSrc = cspMatch[1].split(';').map((s) => s.trim()).find((s) => s.startsWith('connect-src'));
+  assert.ok(connectSrc, 'CSP must set connect-src explicitly');
+  assert.ok(/\bhttps:/.test(connectSrc), 'connect-src must allow https: (the server URL is user-configured)');
+
   console.log('all tests passed');
 }()).catch((error) => {
   console.error(error);
