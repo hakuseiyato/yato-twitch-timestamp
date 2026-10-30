@@ -2595,6 +2595,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       if (!out.created.length) skips.count(out.skipped ? '範囲が取れない候補' : 'マーカーが無い候補');
       out.created.forEach(function (created) {
         plan.shorts[created.id] = created.name;
+        // 消された Short の placed が残っていると、新しい Short にチャット動画と字幕が置かれない
+        // A placed record left from a deleted Short would keep chat and captions off the new Short.
+        YTSImport.clearPlaced(plan, [created.id]);
         shorts.push({ id: created.id, sequenceId: created.sequenceId });
         result.shorts += 1;
       });

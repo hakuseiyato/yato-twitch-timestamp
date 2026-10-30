@@ -31,9 +31,21 @@ const YTSImport = (function () {
     return { toCreate: toCreate, done: done };
   }
 
-  // フル尺 Sequence の名前 YYMMDD_<タイトル> / The full-length sequence name YYMMDD_<title>
+  // フル尺 Sequence の名前。夜の処理が書いた sequence_name（素材名から作る）を優先し、無い古い計画は YYMMDD_<タイトル>
+  // （素材名と同じ規則: ファイル名に使えない文字と制御文字を除き、前後空白を落として 30 文字）
+  // The full-length sequence name: the sequence_name written overnight (from the footage name) wins; older plans without it
+  // get YYMMDD_<title> (same rule as the footage name: forbidden and control chars stripped, trimmed, cut to 30).
   function sequenceName(plan) {
-    return plan.date_tag + '_' + plan.title;
+    if (plan.sequence_name) return String(plan.sequence_name);
+    const cleaned = String(plan.title || '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '').trim();
+    return plan.date_tag + '_' + Array.from(cleaned).slice(0, 30).join('').trim();
+  }
+
+  // 作り直した Short の id を plan.placed から外す（消された Short の記録で配置を飛ばさない）。plan を返す
+  // Drops the ids of recreated Shorts from plan.placed (a deleted Short's record must not skip placement). Returns plan.
+  function clearPlaced(plan, ids) {
+    if (plan && plan.placed) (ids || []).forEach(function (id) { delete plan.placed[String(id)]; });
+    return plan;
   }
 
   // 状態欄の最後の 1 行 / The final status line
@@ -48,6 +60,7 @@ const YTSImport = (function () {
     planFiles: planFiles,
     pendingCandidates: pendingCandidates,
     sequenceName: sequenceName,
+    clearPlaced: clearPlaced,
     summary: summary
   };
 }());

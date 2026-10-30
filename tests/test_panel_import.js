@@ -15,6 +15,19 @@ const plan = { date_tag: '261030', title: 'VALORANT', candidates: [{ id: 'a' }, 
 assert.deepStrictEqual(Imp.pendingCandidates(plan, ['261030_Short_01_x']), { toCreate: ['b', 'c'], done: { a: '261030_Short_01_x' } });
 assert.deepStrictEqual(Imp.pendingCandidates({ candidates: [{ id: 'z' }] }, []), { toCreate: ['z'], done: {} });
 assert.strictEqual(Imp.sequenceName(plan), '261030_VALORANT');
+// 夜の処理が書いた sequence_name を優先する / The sequence_name written overnight wins
+assert.strictEqual(Imp.sequenceName({ date_tag: '261030', title: 'X', sequence_name: '261030_X_2' }), '261030_X_2');
+// 古い計画はタイトルから: 禁止文字と制御文字を除き、前後空白を落として 30 文字 / Old plans fall back to the title: forbidden and control chars stripped, trimmed, cut to 30
+assert.strictEqual(Imp.sequenceName({ date_tag: '261030', title: ' VALORANT: ランク\\上げ?\t ' }), '261030_VALORANT ランク上げ');
+assert.strictEqual(Imp.sequenceName({ date_tag: '261030', title: 'あ'.repeat(40) }), '261030_' + 'あ'.repeat(30));
+assert.strictEqual(Imp.sequenceName({ date_tag: '261030', title: 'a/b*c"d<e>f|g\u0000h', sequence_name: '' }), '261030_abcdefgh');
+
+// 作り直した Short は置いた記録を消す（チャット動画と字幕をもう一度置く）/ A recreated Short loses its placed record, so chat and captions are placed again
+const placedPlan = { placed: { a: { chat: true }, b: { caption: true }, c: { chat: true } } };
+assert.strictEqual(Imp.clearPlaced(placedPlan, ['a', 'c', 'zz']), placedPlan);
+assert.deepStrictEqual(placedPlan.placed, { b: { caption: true } });
+const noPlaced = { candidates: [] };
+assert.deepStrictEqual(Imp.clearPlaced(noPlaced, ['a']), { candidates: [] });
 assert.strictEqual(Imp.summary({ shorts: 3, chats: 2, captions: 0, skipped: ['字幕は bin から各 Short へドラッグ'] }), 'Short 3 本、チャット動画 2 本、字幕 0 本（字幕は bin から各 Short へドラッグ）');
 
 // 飛ばした理由が無ければ括弧を付けない。複数は「、」区切り / No parentheses without reasons; several are joined with 、
@@ -46,6 +59,9 @@ assert.ok(functionBody('setBusy').indexOf('importRunning') >= 0, 'setBusy must O
 const createBody = functionBody('createPlanShorts');
 const loopStart = createBody.indexOf('for (let i = 0; i < pending.toCreate.length');
 assert.ok(loopStart >= 0 && createBody.indexOf('writePlan(planPath, plan)', loopStart) > loopStart, 'writePlan must run inside the Short loop');
+// 作った Short の placed を書き戻しの前に消す / placed of a created Short is cleared before the write-back
+const clearAt = createBody.indexOf('YTSImport.clearPlaced(plan, [created.id])', loopStart);
+assert.ok(clearAt > loopStart && clearAt < createBody.indexOf('writePlan(planPath, plan)', loopStart), 'createPlanShorts must clear placed before writePlan');
 // 計画のある日付フォルダは全部並べる（最初の 1 つで止めない）/ Every day folder with a plan is listed (no break after the first)
 assert.ok(functionBody('listImportPlans').indexOf('break') < 0, 'listImportPlans must list every day folder');
 
