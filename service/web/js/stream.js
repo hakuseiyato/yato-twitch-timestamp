@@ -133,16 +133,35 @@
 
   // ---- スタンプ一覧（件数が少ないので追加時は組み直す）/ Stamp list (small, rebuilt on add) ----
 
+  // stamps と stampItems は常に offset 順（stampRange の範囲とグラフが前提にする）。「候補を先に」は並べる順だけ変える
+  // stamps and stampItems always stay in offset order (stampRange and the graph rely on it); "Candidates first" only changes the display order
   function renderStamps() {
     stamps.sort(function (a, b) { return a.offset_sec - b.offset_sec || (a.id < b.id ? -1 : 1); });
     stampItems = stamps.map(function (s) {
-      return el('li', null, [
+      const candidate = TSLib.isCandidate(s.memo);
+      let text;
+      if (candidate) {
+        // 候補はバッジ + 印を外した本文 / Candidates: badge + memo without the prefix
+        text = el('span', { class: 'row-text' }, [
+          el('span', { class: 'badge-candidate', text: '候補' }),
+          s.memo.replace(TSLib.CANDIDATE_PATTERN, '')
+        ]);
+      } else {
+        text = s.memo ? el('span', { class: 'row-text', text: s.memo }) : el('span', { class: 'row-text muted', text: '（メモなし / no memo）' });
+      }
+      return el('li', { class: candidate ? 'candidate' : null }, [
         el('span', { class: 'row-time', text: tc(s.offset_sec) }),
         el('span', { class: 'row-name', text: s.by }),
-        s.memo ? el('span', { class: 'row-text', text: s.memo }) : el('span', { class: 'row-text muted', text: '（メモなし / no memo）' })
+        text
       ]);
     });
-    $('stamp-list').replaceChildren.apply($('stamp-list'), stampItems);
+    let shown = stampItems;
+    if ($('stamp-candidates-first').checked) {
+      shown = stamps.map(function (s, i) { return i; })
+        .sort(function (i, j) { return TSLib.candidateFirst(stamps[i], stamps[j]); })
+        .map(function (i) { return stampItems[i]; });
+    }
+    $('stamp-list').replaceChildren.apply($('stamp-list'), shown);
     highlighted.stamps = [0, 0];
     $('stamp-count').textContent = '(' + stamps.length.toLocaleString() + ')';
     $('stamp-empty').hidden = stamps.length > 0;
@@ -159,7 +178,9 @@
   }
 
   function redraw() {
-    graph.setData({ counts: YTSBins.binCounts(times, binSec, lengthSec()), binSec: binSec, stamps: stamps });
+    // graph.js は Node でも読むので TSLib を見ない。候補の印はここで付ける / graph.js is also loaded in Node and never reads TSLib, so candidates are marked here
+    const marked = stamps.map(function (s) { return Object.assign({}, s, { candidate: TSLib.isCandidate(s.memo) }); });
+    graph.setData({ counts: YTSBins.binCounts(times, binSec, lengthSec()), binSec: binSec, stamps: marked });
     if (selectedBin !== null) {
       graph.select(selectedBin);
       selectedBin = graph.state().selected;
@@ -484,6 +505,11 @@
     $('tab-stamps').addEventListener('click', function () { showTab('stamps'); });
     $('tab-comments').addEventListener('keydown', tabKeys);
     $('tab-stamps').addEventListener('keydown', tabKeys);
+    // 組み直すと in-bin が消えるので選択を当て直す / Rebuilding drops in-bin, so the selection is re-applied
+    $('stamp-candidates-first').addEventListener('change', function () {
+      renderStamps();
+      if (selectedBin !== null) applySelection(false);
+    });
     $('mark-button').addEventListener('click', markHere);
     $('import-button').addEventListener('click', startImport);
     $('vod-picker').addEventListener('submit', confirmPicker);

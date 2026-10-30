@@ -93,6 +93,7 @@ const YTSGraph = (function () {
         hover: cssVar(canvas, '--graph-bar-hover') || '#7d8fa3',
         accent: cssVar(canvas, '--accent'),
         stamp: cssVar(canvas, '--warning'),
+        candidate: cssVar(canvas, '--candidate') || '#c792ea',
         axis: cssVar(canvas, '--border'),
         label: cssVar(canvas, '--secondary'),
         font: cssVar(canvas, '--font-body')
@@ -119,9 +120,10 @@ const YTSGraph = (function () {
         if (h) ctx.fillRect(i * step, baseY - h, Math.max(1, step - gap), h);
       }
 
-      // スタンプの縦線 / Stamp lines
-      ctx.fillStyle = colors.stamp;
+      // スタンプの縦線。候補（呼び出し側が s.candidate を付ける）は --candidate
+      // Stamp lines. Candidates (the caller sets s.candidate) use --candidate
       for (const s of stamps) {
+        ctx.fillStyle = s.candidate ? colors.candidate : colors.stamp;
         const x = (Number(s.offset_sec) / binSec) * step;
         if (x >= 0 && x <= cssWidth) ctx.fillRect(Math.min(x, cssWidth - 2), 0, 2, baseY);
       }

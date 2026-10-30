@@ -1106,6 +1106,8 @@ assert.strictEqual(TSLib.isCandidate('候補 笑い'), false);
 assert.strictEqual(TSLib.isCandidate(''), false);
 assert.strictEqual(TSLib.isCandidate(null), false);
 assert.strictEqual(TSLib.isCandidate('候補： 全角'), true);
+// 一覧の本文から印を外すのに使う / Used to strip the prefix from list text
+assert.strictEqual('  候補： 笑い'.replace(TSLib.CANDIDATE_PATTERN, ''), '笑い');
 const order = [
   { id: 'y0000003', offset_sec: 10, memo: 'a' },
   { id: 'y0000002', offset_sec: 50, memo: '候補: b' },

@@ -19,6 +19,8 @@
   --error: #ef7373;
   --ok: #77c879;
   --warning: #e0b050;
+  /* 見どころ候補（#2b2b2b 上で 5:1 以上）/ Highlight candidates (5:1 or more on #2b2b2b) */
+  --candidate: #c792ea;
   --highlight: #2d8ceb22;
   --shadow: #0008;
   /* グラフの棒（#2b2b2b 上で 3:1 以上）/ Graph bars (3:1 or more on #2b2b2b) */
@@ -275,6 +277,22 @@ main.wide { max-width: 1280px; }
 .row-time { color: var(--secondary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .row-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .row-text { overflow-wrap: anywhere; }
+/* 候補は左線を紫に。選択（in-bin）と点滅（flash）はこれより後に書いて上書きさせる
+   Candidates get a violet left border; in-bin and flash come later so they override it */
+.row-list li.candidate { border-left-color: var(--candidate); }
+.badge-candidate {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--candidate);
+  color: #1b1b1b; /* on --candidate: 7:1 */
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+/* 「候補を先に」の切り替え。行全体を押せる 44px の高さ / "Candidates first" toggle; the whole 44px row is clickable */
+.sort-toggle { display: flex; align-items: center; gap: var(--space-sm); min-height: var(--control-h); padding: 0 var(--space-md); cursor: pointer; }
+.sort-toggle input { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
 .row-list li.in-bin { border-left-color: var(--accent); background: var(--highlight); }
 .row-list li.flash { border-left-color: var(--warning); background: var(--highlight); }
 

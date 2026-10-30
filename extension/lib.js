@@ -1258,6 +1258,7 @@ const TSLib = (function () {
 
   return {
     CANDIDATE_PREFIX: CANDIDATE_PREFIX,
+    CANDIDATE_PATTERN: CANDIDATE_PATTERN,
     isCandidate: isCandidate,
     candidateFirst: candidateFirst,
     shortSequenceName: shortSequenceName,

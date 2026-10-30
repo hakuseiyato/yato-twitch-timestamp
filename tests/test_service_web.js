@@ -79,6 +79,36 @@ assert.strictEqual(Graph.labelStep(60, 10), 10);
 assert.strictEqual(Graph.labelStep(120, 100), 1);
 assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 
+// グラフの縦線: candidate が真のスタンプは --candidate、それ以外は --warning（canvas は最小の偽物）
+// Graph stamp lines: stamps with a truthy candidate use --candidate, others --warning (minimal fake canvas)
+(function () {
+  const css = { '--warning': '#e0b050', '--candidate': '#c792ea' };
+  const calls = [];
+  const ctx = { setTransform() {}, clearRect() {}, fillText() {}, fillStyle: '', globalAlpha: 1,
+    fillRect(x, y, w, h) { calls.push({ x: x, y: y, w: w, fill: ctx.fillStyle }); } };
+  const fakeNode = () => ({ style: {}, setAttribute() {}, removeAttribute() {}, addEventListener() {}, append() {} });
+  const wrap = Object.assign(fakeNode(), { clientWidth: 300, getBoundingClientRect: () => ({ left: 0, width: 300, height: 100 }) });
+  const canvas = Object.assign(fakeNode(), { parentElement: wrap, getContext: () => ctx,
+    getBoundingClientRect: () => ({ left: 0, width: 300, height: 100 }) });
+  global.window = { devicePixelRatio: 1, addEventListener() {} };
+  global.document = { createElement: fakeNode };
+  global.getComputedStyle = () => ({ getPropertyValue: name => css[name] || '' });
+  global.TSLib = require('../service/web/js/lib.js');
+  try {
+    const g = Graph.createGraph(canvas);
+    calls.length = 0;
+    g.setData({ counts: Uint32Array.from([1, 2, 3]), binSec: 30, stamps: [
+      { offset_sec: 10, memo: '人 / human' },
+      { offset_sec: 40, memo: '候補: 山 / peak', candidate: true }
+    ] });
+    // 縦線は y = 0・幅 2 で描く / Stamp lines are drawn at y = 0 with width 2
+    const lines = calls.filter(c => c.y === 0 && c.w === 2).map(c => c.fill);
+    assert.deepStrictEqual(lines, ['#e0b050', '#c792ea']);
+  } finally {
+    delete global.window; delete global.document; delete global.getComputedStyle; delete global.TSLib;
+  }
+}());
+
 // 取得の拒否は最終ページ扱いにしない / A rejected fetch is never treated as the last page
 assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'failed integrity check', extensions: { code: 'IntegrityCheckFailed' } }], data: { video: { id: '1', comments: null } } }]),
   /チャット取得が拒否されました \/ Chat fetch rejected: .*failed integrity check/);
