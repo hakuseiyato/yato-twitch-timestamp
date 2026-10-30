@@ -77,6 +77,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let userOffsetSec = 0;
   let offsetCsvPath = '';
   let busy = false;
+  // 「配信を取り込む」の実行中。途中の setBusy(false)（openServerStream など）でボタンが戻らないよう setBusy が OR する
+  // An import is in flight; setBusy ORs it in so nested setBusy(false) calls (openServerStream etc.) do not re-enable buttons mid-import.
+  let importRunning = false;
   let previewState = null;
   let choices = {};
   let libraryReady = typeof TSLib !== 'undefined';
@@ -526,7 +529,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   function setBusy(value) {
-    busy = value;
+    busy = value || importRunning;
     updateControls();
   }
 
@@ -2465,8 +2468,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     return result && result.err === 0 && Array.isArray(result.data) ? result.data : [];
   }
 
-  // 新しい _YYMMDD から順に、取り込み計画があるいちばん新しいフォルダの計画を並べる
-  // Lists the plans of the newest _YYMMDD folder that has any.
+  // 取り込み計画がある _YYMMDD を全部、新しい順に並べる（先頭 = いちばん新しいものが選ばれる）
+  // Lists every _YYMMDD folder that has a plan, newest first (the first, newest one is selected).
   function listImportPlans() {
     const root = footageRoot();
     elements.importRoot.value = root;
@@ -2481,7 +2484,6 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
         option.title = option.value;
         elements.importPlan.appendChild(option);
       });
-      if (files.length) break;
     }
     if (!elements.importPlan.options.length) setStatus('peakaboo.json が見つかりません（Footage の場所: ' + root + '）', 'error');
     updateControls();
@@ -2570,8 +2572,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     return true;
   }
 
-  // (4) 済んでいない候補の Short を 1 本ずつ作り、plan.shorts に書き戻す。配置の対象 [{id, sequenceId}] を返す
-  // (4) Creates the missing Shorts one by one and writes plan.shorts back. Returns the placement targets [{id, sequenceId}].
+  // (4) 済んでいない候補の Short を 1 本ずつ作り、そのたびに plan.shorts を書き戻す。配置の対象 [{id, sequenceId}] を返す
+  // (4) Creates the missing Shorts one by one, writing plan.shorts back after each. Returns the placement targets [{id, sequenceId}].
   async function createPlanShorts(plan, planPath, result, skips) {
     setBusy(true);
     const base = { dateTag: plan.date_tag, parentBin: 'Sequence', preSec: Number(plan.pre_sec), postSec: Number(plan.post_sec), includeHuman: true };
@@ -2583,19 +2585,23 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     plan.shorts = plan.shorts || {};
     for (let i = 0; i < pending.toCreate.length; i += 1) {
       setStatus('Short を作成中 (' + (i + 1) + '/' + pending.toCreate.length + ')', '');
+      let out;
       try {
-        const out = await callHost('ytsCreateShorts(' + hostLiteral(Object.assign({ onlyIds: [pending.toCreate[i]] }, base)) + ')', true);
-        if (!out.created.length) skips.count(out.skipped ? '範囲が取れない候補' : 'マーカーが無い候補');
-        out.created.forEach(function (created) {
-          plan.shorts[created.id] = created.name;
-          shorts.push({ id: created.id, sequenceId: created.sequenceId });
-          result.shorts += 1;
-        });
+        out = await callHost('ytsCreateShorts(' + hostLiteral(Object.assign({ onlyIds: [pending.toCreate[i]] }, base)) + ')', true);
       } catch (error) {
         skips.note(messageOf(error));
+        continue;
       }
+      if (!out.created.length) skips.count(out.skipped ? '範囲が取れない候補' : 'マーカーが無い候補');
+      out.created.forEach(function (created) {
+        plan.shorts[created.id] = created.name;
+        shorts.push({ id: created.id, sequenceId: created.sequenceId });
+        result.shorts += 1;
+      });
+      // 1 本ごとに書き戻す（途中で止まっても再実行で二重に作らない）。書けなければ取り込みごと止める
+      // Written back after every Short (a stop midway never duplicates on rerun); a failed write stops the whole import.
+      if (out.created.length) writePlan(planPath, plan);
     }
-    if (result.shorts) writePlan(planPath, plan);
     return shorts;
   }
 
@@ -2642,7 +2648,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   // "取り込む": reads the plan, runs (1)-(5) in order, then (6) returns to the full-length sequence and shows the counts.
   async function importStream() {
     const planPath = elements.importPlan.value;
-    if (busy || !planPath) return;
+    if (busy || importRunning || !planPath) return;
     let plan;
     try {
       plan = JSON.parse(readText(planPath));
@@ -2654,6 +2660,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     const result = { shorts: 0, chats: 0, captions: 0, skipped: [] };
     const skips = createSkipList();
     try {
+      importRunning = true;
       const imported = await importPlanFootage(plan);
       if (!(await syncPlanStream(plan, imported))) return;
       const shorts = await createPlanShorts(plan, planPath, result, skips);
@@ -2666,6 +2673,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     } catch (error) {
       setStatus(messageOf(error), 'error');
     } finally {
+      importRunning = false;
       setBusy(false);
     }
   }

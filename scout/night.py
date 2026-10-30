@@ -373,6 +373,33 @@ def step_captions(ctx: JobContext, job: dict) -> None:
     job['steps']['captions'] = 'done'
 
 
+# パネルが書き戻すキー（作った Short・置いたチャット動画 / 字幕）。夜の再実行で消すと朝に二重に作る
+# Keys the panel writes back (created Shorts, placed chat videos / captions); dropping them on a night rerun duplicates work in the morning.
+_PANEL_KEYS = ('shorts', 'placed')
+
+
+def _with_panel_keys(plan: dict, path: Path) -> dict:
+    """既にある計画ファイルの shorts / placed を新しい計画へ写す（壊れた JSON は例外で止める）。
+    Copy shorts / placed from an existing plan file into the new plan (a broken JSON raises).
+
+    Parameters
+    ----------
+    plan : dict
+        書く予定の計画 / The plan about to be written.
+    path : Path
+        書き先 / The destination file.
+
+    Returns
+    -------
+    dict
+        パネルのキーを足した計画（plan は変えない）/ The plan with the panel keys added (plan itself is unchanged).
+    """
+    if not path.exists():
+        return plan
+    old = json.loads(path.read_text(encoding='utf-8'))
+    return {**plan, **{key: old[key] for key in _PANEL_KEYS if key in old}}
+
+
 def step_plan(ctx: JobContext, job: dict) -> None:
     """peakaboo_<vodId>.json と peakaboo.json（同じ内容）を書き、完了を通知する。
     Write peakaboo_<vodId>.json and peakaboo.json (same content) and notify completion."""
@@ -389,11 +416,10 @@ def step_plan(ctx: JobContext, job: dict) -> None:
         steps=dict(job['steps']), finished_at=scout.now_iso())
     if job.get('offset_note'):
         plan['offset_note'] = job['offset_note']  # 設計 §7.5-2: 人が見るため計画にも残す / kept for a human to see
-    text = json.dumps(plan, ensure_ascii=False, indent=2)
     day = _day_dir(ctx)
     day.mkdir(parents=True, exist_ok=True)
-    _write_atomic(day / f'peakaboo_{ctx.vod["id"]}.json', text)
-    _write_atomic(day / 'peakaboo.json', text)
+    for path in (day / f'peakaboo_{ctx.vod["id"]}.json', day / 'peakaboo.json'):
+        _write_atomic(path, json.dumps(_with_panel_keys(plan, path), ensure_ascii=False, indent=2))
     job['steps']['plan'] = 'done'
     done = night_lib.status_text_done(len(candidates), sum(1 for c in candidates if c['chat']),
                                       sum(1 for c in candidates if c['caption']))

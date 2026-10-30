@@ -340,6 +340,27 @@ class StepPlanTest(Base):
         self.assertEqual(job['steps']['plan'], 'done')
         self.notify.assert_called_once_with('Peakaboo: 完了（候補 2・チャット動画 1・字幕 0）')
 
+    def test_rewrite_keeps_panel_keys(self):
+        # パネルが書き戻した shorts / placed は、夜の再実行で計画を書き直しても残る
+        # shorts / placed written back by the panel survive a night rerun rewriting the plan.
+        client = FakeClient({'/api/streams/316644129905/stamps': {'stream': dict(ROW, vod_offset_sec=5), 'records': []}})
+        day = self.footage / '_261030'
+        day.mkdir(parents=True)
+        old = {'version': 1, 'candidates': [], 'shorts': {'a': 'x'}, 'placed': {'a': {'chat': True}}}
+        (day / 'peakaboo_2914625472.json').write_text(json.dumps(old), encoding='utf-8')
+        (day / 'peakaboo.json').write_text(json.dumps({'version': 1, 'shorts': {'a': 'x'}}), encoding='utf-8')
+        job = self.state.job(VOD['id'])
+        job.update(stream_id='316644129905', footage=str(day / '261030_x.mp4'), footage_existing=False)
+        job['steps'].update({s: 'done' for s in ('vod', 'chat', 'scout', 'render', 'captions')})
+        night.step_plan(self.ctx(client), job)
+        per_vod = json.loads((day / 'peakaboo_2914625472.json').read_text(encoding='utf-8'))
+        self.assertEqual(per_vod['shorts'], {'a': 'x'})
+        self.assertEqual(per_vod['placed'], {'a': {'chat': True}})
+        self.assertEqual(per_vod['stream_id'], '316644129905')
+        shared = json.loads((day / 'peakaboo.json').read_text(encoding='utf-8'))
+        self.assertEqual(shared['shorts'], {'a': 'x'})
+        self.assertNotIn('placed', shared)
+
 
 class StepVodTest(Base):
     def test_name_is_chosen_once_and_part_is_replaced(self):

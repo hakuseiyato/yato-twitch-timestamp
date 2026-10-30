@@ -32,4 +32,21 @@ const importScript = html.indexOf('<script src="../js/import.js"></script>');
 assert.ok(importScript >= 0 && importScript < html.indexOf('<script src="../js/main.js"></script>'), 'import.js must load before main.js');
 assert.ok(html.indexOf('title="配信を取り込む（夜の処理の結果を Premiere に）"') >= 0);
 
+// 取り込みは同時に 1 つだけ: importStream が importRunning を見て立て、setBusy がそれを OR する（main.js は node で動かせないので文字列で固定）
+// Only one import at a time: importStream checks and sets importRunning, setBusy ORs it in (main.js cannot run in node, so pinned by source text).
+const mainSource = fs.readFileSync(path.resolve(__dirname, '../panel/js/main.js'), 'utf8');
+function functionBody(name) {
+  const match = new RegExp('\\n  (?:async )?function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}\\n').exec(mainSource);
+  assert.ok(match, 'main.js has no function ' + name);
+  return match[0];
+}
+assert.ok(functionBody('importStream').indexOf('importRunning') >= 0, 'importStream must use importRunning');
+assert.ok(functionBody('setBusy').indexOf('importRunning') >= 0, 'setBusy must OR in importRunning');
+// Short を作るたびに計画を書き戻す（ループの中で writePlan）/ The plan is written back after every created Short (writePlan inside the loop)
+const createBody = functionBody('createPlanShorts');
+const loopStart = createBody.indexOf('for (let i = 0; i < pending.toCreate.length');
+assert.ok(loopStart >= 0 && createBody.indexOf('writePlan(planPath, plan)', loopStart) > loopStart, 'writePlan must run inside the Short loop');
+// 計画のある日付フォルダは全部並べる（最初の 1 つで止めない）/ Every day folder with a plan is listed (no break after the first)
+assert.ok(functionBody('listImportPlans').indexOf('break') < 0, 'listImportPlans must list every day folder');
+
 console.log('test_panel_import: ok');
