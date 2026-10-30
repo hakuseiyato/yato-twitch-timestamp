@@ -1105,6 +1105,7 @@ assert.strictEqual(TSLib.isCandidate('  候補:x'), true);
 assert.strictEqual(TSLib.isCandidate('候補 笑い'), false);
 assert.strictEqual(TSLib.isCandidate(''), false);
 assert.strictEqual(TSLib.isCandidate(null), false);
+assert.strictEqual(TSLib.isCandidate('候補： 全角'), true);
 const order = [
   { id: 'y0000003', offset_sec: 10, memo: 'a' },
   { id: 'y0000002', offset_sec: 50, memo: '候補: b' },
@@ -1119,4 +1120,5 @@ assert.strictEqual(TSLib.shortSequenceName('a/b:c*d?e"f<g>h|i', 12), 'Short_12_a
 assert.strictEqual(TSLib.shortSequenceName('   ', 1), 'Short_01');
 assert.strictEqual(TSLib.shortSequenceName('あいうえおかきくけこさしすせそたちつてとなにぬ', 7), 'Short_07_あいうえおかきくけこさしすせそたちつてと');
 assert.strictEqual(TSLib.shortSequenceName('x', 100), 'Short_100_x');
+assert.strictEqual(TSLib.shortSequenceName('候補： 笑い | x', 2), 'Short_02_笑い');
 console.log('all tests passed');

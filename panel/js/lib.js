@@ -1218,12 +1218,16 @@ const TSLib = (function () {
     };
   }
 
-  // 見どころ候補は memo の先頭（全角コロン）だけで見分ける / Highlight candidates are identified only by this memo prefix (full-width colon).
+  // 見どころ候補は memo の先頭だけで見分ける。書くときは半角コロンの '候補:'
+  // Highlight candidates are identified only by the memo prefix; writers use the ASCII colon '候補:'.
   const CANDIDATE_PREFIX = '候補:';
+  // 読むときは IME で入る全角コロン '候補：' も候補とみなす（先頭の空白は無視）
+  // Readers also accept the full-width colon '候補：' typed via IME (leading whitespace ignored).
+  const CANDIDATE_PATTERN = /^\s*候補[:：]\s*/;
 
-  // 前後の空白を除いた memo が候補の印で始まるか / Whether the trimmed memo starts with the candidate prefix.
+  // memo が候補の印で始まるか / Whether the memo starts with the candidate prefix.
   function isCandidate(memo) {
-    return String(memo || '').trim().startsWith(CANDIDATE_PREFIX);
+    return CANDIDATE_PATTERN.test(String(memo || ''));
   }
 
   // sort 用: 候補を先に、同じ区分なら offset_sec 昇順、同値なら id 昇順
@@ -1242,7 +1246,7 @@ const TSLib = (function () {
   // Short sequence name: Short_NN_body (body drops the candidate prefix and everything from ' | ', strips unsafe characters, max 20 chars).
   function shortSequenceName(memo, n) {
     const body = String(memo || '')
-      .replace(/^\s*候補:\s*/, '')
+      .replace(CANDIDATE_PATTERN, '')
       .split(' | ')[0]
       .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '')
       .replace(/\s+/g, ' ')
