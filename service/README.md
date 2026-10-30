@@ -3,8 +3,7 @@
 Cloudflare Worker 1 本で、JSON API（`/api/`・`/auth/`）と `web/` の静的ページ（Workers Static Assets）を出す。
 D1 に配信・スタンプ・会員などを置き、R2 に VOD ごとのチャット JSON を置く。Cloudflare Workers の Free プランで動かす前提。
 
-Chrome 拡張と Premiere Pro / After Effects パネルはまだこのサービスと通信しない（計画 2/3・3/3 で対応予定）。
-今はブラウザの Web ページから使う。
+ブラウザの Web ページに加え、Chrome 拡張（`POST /api/stamps` でスタンプを送る）と Premiere Pro / After Effects パネル（同期元「サーバー」。鏡 CSV に写して同期の前に pull、後に push）がこのサービスと通信する。
 
 ## 必要なもの
 
@@ -103,7 +102,7 @@ Worker 側（`src/`）は `../../panel/js/lib.js` を直接 import する。`ext
 ### パネル用トークン
 
 `/me` で `ytt_` トークンを発行・失効する。平文は発行時に 1 度だけ表示され、D1 には SHA-256 だけが残る。
-発行と失効は Web ページ（session cookie）からだけできる。パネルはまだサービスに対応していないので、今は発行しても使い道がない。
+発行と失効は Web ページ（session cookie）からだけできる。パネルの「サーバー」に URL とこのトークンを入れて使う（`Authorization: Bearer ytt_…`）。401 が返ったら失効しているので発行し直す。
 
 ### Free 枠の見方
 
@@ -134,6 +133,16 @@ npx wrangler d1 execute yts --remote --command "SELECT channel, login, role FROM
 ```
 
 ## API 一覧
+
+### CORS（パネル用）
+
+CEP パネルは `file://` 起点（`Origin: null`）で Node も無効なので、`fetch` で Worker を叩くには CORS の許可が要る。
+`/api/*` の `OPTIONS` には 204（`Access-Control-Allow-Origin: *`、`Authorization, Content-Type, X-Requested-With`、全メソッド、`Max-Age: 86400`）を返し、
+実際の要求には **`Authorization` ヘッダがあるときだけ** `Access-Control-Allow-Origin: *`（と `Vary: Origin`）を付ける（`src/cors.ts`）。
+cookie で認証した要求には付けない。`*` は credentials と併用できないので、他サイトのページが利用者の cookie で API を読むことはできず、
+Bearer は攻撃側のページが持っていない値なので、CSRF の守り（cookie の変更系に `X-Requested-With: yts` 必須）は変わらない。
+許可するオリジンを絞るなら `*` をやめ、cookie 経由にも付けないこと（`null` オリジンは誰でも名乗れるので許可しても意味がない）。
+
 
 経路の登録は `src/index.ts` と `src/auth.ts`・`src/members.ts`・`src/streams.ts`・`src/stamps.ts`・`src/chat.ts`。
 認証は session cookie（`yts_`）→ `Authorization: Bearer ytt_…` → `Authorization: Bearer <Twitch トークン>` の順に見る。Twitch トークンは `TWITCH_CLIENT_ID` のアプリのものだけ通す。

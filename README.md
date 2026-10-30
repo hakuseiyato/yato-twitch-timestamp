@@ -141,6 +141,30 @@ DualPlayer limitations: a stamp's ID comes from its time, so moving or deleting 
 
 After "CSV" (and after a DualPlayer conversion) the panel links the open sequence/comp automatically when it is not linked yet and the CSV has a single stream, then syncs. An already linked target is never re-linked, and the offset starts at 0 for a newly linked target. The first sync of a target still stops at the confirm drawer, so the usual flow is "CSV" → pick the file → "この内容で同期".
 
+### サーバー / Server
+
+Instead of a shared CSV file, the panel can use a stream stored in the cloud service (`service/`) as its sync source.
+
+1. Sign in on the service, open `/me`, and issue a panel token (`ytt_…`). It is shown only once.
+2. In the panel, click "サーバー", enter the server URL (for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`; only `https://host` or `https://host:port`) and the token, and click "接続 / Connect". The settings are saved only after the server accepts them; afterwards "サーバー" connects right away.
+3. Choose the channel and the stream (`YYYY-MM-DD HH:mm · title · スタンプ n`) and click "この配信を開く / Open this stream".
+4. The panel copies the stream's stamps into a mirror CSV and opens it like any sync file. As with "CSV" (see "Fewer clicks"), it links the open sequence/comp if it is not linked yet and syncs; the first sync stops at the confirm drawer, so the usual flow is "この配信を開く" → "この内容で同期". After that, "紐付け" and "同期" work as for a CSV file.
+
+The mirror CSV is `%APPDATA%\yato-twitch-timestamp\server\<host>\<stream_id>_sync.csv` (the panel's CEP `USER_DATA` folder; characters other than letters, digits, `_`, `-` and `.` in the host and the stream id become `_`, so `host:8443` becomes `host_8443`). Next to it are `<stream_id>.server.json` (server URL, stream, your login, and the last pull and push times) and the usual `<stream_id>_sync.yts-sync.json` sidecar. The panel manages these files; do not edit them.
+
+What "同期" does with a server stream:
+
+- **Pull first.** It fetches all of the stream's stamps (tombstones included) and merges them into the mirror CSV by `id` (the later `updated_at` wins), then calculates the differences as usual. The log shows "サーバーから n 件取り込み / pulled n". If the server cannot be reached or refuses (401, 403, network), the sync stops with "サーバーから取り込めないため同期を中止しました / Sync stopped: could not pull from the server: …", because syncing with stale local data would misjudge conflicts.
+- **Push after.** Once the sync has written the mirror CSV, the records changed since the last push are sent with `POST /api/stamps` (`source: 'panel'`, 500 per request): "サーバーへ n 件送信 / pushed n". Records exactly as the server returned them on the pull are not sent back. The last-push time is the moment the push started, so an edit made during a push is sent next time. If a request fails (network, 5xx, 401, …), the last-push time does not move: "サーバーへの送信は次回に再試行 / push will retry: …", and the next "同期" sends everything changed since the previous successful push. The markers and the mirror CSV are already synchronized at that point.
+- **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason> / failed n" with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません / cannot delete others' records"), you deleted a marker recorded by someone else; only its author (or a channel owner on the web) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
+- **Recorder.** Records created by the panel ("＋追加", and markers picked up by "同期") get your Twitch login from `/api/me` as `by` instead of `premiere` / `ae`.
+
+Errors:
+
+- "トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me" (401): the token was revoked or mistyped. Issue a new one on `/me`, enter it under "サーバー", and click "接続 / Connect".
+- "このチャンネルの会員ではありません / Not a member of this channel" (403): ask a channel owner to add your Twitch login in `/admin`.
+- "この鏡 CSV は別のサーバー（…）のものです。「サーバー」で接続し直してください / This mirror CSV belongs to another server": the saved server URL changed after the mirror was made. Connect to that server again, or open the stream from the new server (it gets its own mirror folder).
+
 ### Exporting marker frames
 
 The image button left of "↻" exports every marker in the list; it first asks for the destination folder (starting at the last folder used, else `frames/` next to the sync file) and remembers it per host. The image button on each row exports that marker to the remembered folder without asking (or to `frames/` next to the sync file if no folder was chosen yet).
@@ -190,7 +214,7 @@ The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves r
 
 `service/` is a single Cloudflare Worker deployed to the owner's personal Cloudflare account on the Free plan. The Worker serves the JSON API under `/api/` and the static pages in `service/web/`. D1 stores channels, members, streams, stamps, sessions, and panel tokens; R2 stores one chat JSON file per VOD. Users sign in with Twitch through the same Twitch application (redirect `https://<worker-host>/auth/callback`), and only members of a channel can see its streams. `/` lists the streams of the user's channels and registers a stream from a VOD URL ("VOD から登録"). `/s/<stream_id>` is the stream page: a comment-density graph (15, 30, 60, or 120 second bins, with stamp positions drawn as vertical lines), "コメント" and "スタンプ" tabs, "別ウィンドウ" to detach the comment list to `/s/<stream_id>/comments` (it follows the graph through `BroadcastChannel`), and "ここに印" to add a stamp, recorded as the signed-in user, at the start of the selected bin. "チャットを取り込む" makes the browser fetch the VOD's chat replay directly from Twitch GraphQL and upload it to the Worker once; the Worker stores the body in R2 without parsing it, and importing again overwrites it. Comment times are shifted by the stream's "VOD のずれ" and "反応の遅れ" (default five seconds) settings. `/me` issues panel tokens and `/admin` creates channels and manages members.
 
-The Chrome extension sends stamps to the service when a server URL is set (see [Server sync](#サーバーと同期--server-sync)). The Adobe panel does not talk to the service yet; synchronizing it with the service is planned as a follow-up, and the CSV sync file workflow above is unchanged.
+The Chrome extension sends stamps to the service when a server URL is set (see [Server sync](#サーバーと同期--server-sync)). The Adobe panel can use a service stream as its sync source through a mirror CSV (see [サーバー / Server](#サーバー--server)); the CSV sync file workflow above is unchanged.
 
 See [`service/README.md`](service/README.md) (Japanese) for setup, local development, tests, and operations. The test fixture `service/test/fixtures/gql_comments_page.json` is a synthetic page in the shape of a real Twitch GraphQL chat replay response; its logins, ids and messages are made up.
 

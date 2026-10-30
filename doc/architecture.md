@@ -4,7 +4,7 @@
 
 Yato Twitch Timestamp is a Manifest V3 Chrome extension for recording useful moments during Twitch live streams. Broadcasters and editors can create native Twitch markers, while moderators without permission fall back to local records through the same action. Every record is stored locally and can be exported as a CSV sync file shared with one CEP panel that supports both Premiere Pro and After Effects.
 
-`service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension sends its stamps to the Worker when a server URL is set; the panel does not call the service yet.
+`service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension sends its stamps to the Worker when a server URL is set; the panel can use a Worker stream as its sync source through a mirror CSV.
 
 ## Technology stack
 
@@ -45,6 +45,7 @@ The extension and the panel have no external libraries, package manager, or buil
 - `panel/html/index.html`: shared compact Japanese synchronization UI
 - `panel/css/styles.css`: Adobe-style dark panel theme and operation status colors
 - `panel/js/main.js`: host detection, CSV and sidecar I/O, stream and link state, one-click synchronization and confirmation-drawer orchestration, marker-list editing, thumbnail memory/disk caching, payload construction, and the `evalScript` bridge
+- `panel/js/server.js`: `YTSServer`, the panel's Worker client (settings in `localStorage`, Bearer `ytt_` token, `/api/me`, stream list, stamp pull, 500-record push batches)
 - `panel/js/libs/CSInterface.js`: Adobe CEP bridge library, stored verbatim
 - `panel/jsx/ppro.jsx`: Premiere Pro sequence, marker, and target adapter
 - `panel/jsx/aeft.jsx`: After Effects composition, marker, and target adapter
@@ -98,6 +99,16 @@ When `settings.serverUrl` is set, the extension also uploads records to the Work
 6. Each run that sent something, or stopped before sending, writes `lastSync` (`at`, `accepted`, `failedCount`, `error`). An idle run with nothing pending keeps the previous `lastSync`.
 
 `synced` holds the ids the current server has taken. Saving a different `serverUrl` empties `synced` and `failed`, puts every record id (tombstones included) in `pending`, and starts an upload. A `chrome.alarms` alarm (`yts-flush`, every five minutes) retries the queue, and a successful login starts an upload. "サーバーと同期" queues every local record, tombstones included, before uploading. The popup reads `pending`, `failed`, `synced`, `lastSync`, `serverPermission`, and `auth.expired` through `getState`, shows the per-record state (`failed` > `pending` > `sent` > `unsent`) with `recordSyncState`, maps reason codes to text with `reasonText`, and clears the failure list with `clearFailed`.
+
+### Panel to Worker (mirror CSV)
+
+The panel's sync engine (CSV path, sidecar, `syncPlan`) is unchanged; a server stream is copied into a local mirror CSV that the engine treats like any sync file. The Worker allows the panel's `file://` requests through CORS only for requests with an `Authorization` header (see `service/README.md`).
+
+1. "サーバー" → "接続 / Connect" checks the URL and `ytt_` token with `GET /api/me` and saves them to `localStorage` only when that succeeds; `GET /api/channels/<login>/streams` fills the stream picker.
+2. "この配信を開く" runs `GET /api/streams/<id>/stamps` (all records, tombstones included), merges them into `<USER_DATA>/yato-twitch-timestamp/server/<host>/<stream_id>_sync.csv` with `mergeServerRecords` (later `updated_at` wins), writes `<stream_id>.server.json` (`serverUrl`, `stream_id`, `channel`, `started_at`, `title`, `lastPullAt`, `lastPushAt`, `me`, optional `forcePull`), loads the mirror, and runs the same `autoLinkAndSync` as a CSV pick. A CSV is a mirror when its `.server.json` exists and passes `isServerMeta`.
+3. `syncNow` on a mirror first pulls again (`pullIntoMirror`). A failure (401, 403, network, server mismatch) stops the sync before `computePreview`. Ids listed in `forcePull` take the server's live record even over a newer local tombstone (`mergeServerRecords(local, server, {forceIds})`); `forcePull` is then cleared. The server's `id → updated_at` from this pull is kept in memory.
+4. At the end of `runExecute`, after the CSV write-back and the sidecar update, `pushFromMirror` sends `recordsToPush(mirror records, lastPushAt)` minus records whose `updated_at` equals the one just pulled, through `YTSServer.pushStamps` (`source: 'panel'`, 500 per request). `applyPanelPushResult` treats `accepted` and `stale` as sent and lists other rejections; `forbidden_tombstone` ids are added to `forcePull` so the next pull restores the server's record. `nextPushAt` moves `lastPushAt` to the time the push started only when every request returned a full response; after any thrown request it keeps the previous value, so everything since then is resent (records that already arrived come back as `stale`). Push failures never undo the sync; they are appended to the completion message.
+5. In a mirror, new records and "＋追加" markers use `meta.me` (the `/api/me` login) as `by` instead of `premiere` / `ae`. Pull and push refuse to run when the saved server URL differs from the mirror's `serverUrl`.
 
 ## Panel and host API
 
