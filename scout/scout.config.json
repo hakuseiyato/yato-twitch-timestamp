@@ -1,0 +1,17 @@
+{
+  "server": "https://yato-twitch-timestamp.hakuseiyato.workers.dev",
+  "channel": "terano_naa",
+  "token_path": "%APPDATA%\\peakaboo\\scout.token",
+  "cache_dir": "%LOCALAPPDATA%\\peakaboo\\scout",
+  "weights": { "voice": 1.0, "laugh": 1.0, "keyword": 0.8, "chat": 1.0, "chat_text": 0.5 },
+  "names": { "voice": "声の急変", "laugh": "笑い", "keyword": "発言", "chat": "チャット急増", "chat_text": "チャットの反応" },
+  "threshold": 2.0,
+  "cap_total": 10,
+  "exclude_radius_sec": 30,
+  "merge_sec": 20,
+  "voice_min_db": 8.0,
+  "laugh_words": ["笑", "ハハ", "www", "ｗ"],
+  "keyword_words": ["やばい", "待って", "えっ", "うそ", "無理", "最高", "かわいい", "きた", "すご", "泣く", "草"],
+  "chat_words": ["草", "w", "ｗ", "笑", "かわいい"],
+  "whisper": { "model": "large-v3-turbo", "device": "cuda", "compute_type": "float16", "language": "ja", "beam_size": 5 }
+}
