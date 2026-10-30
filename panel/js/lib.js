@@ -1218,7 +1218,45 @@ const TSLib = (function () {
     };
   }
 
+  // 見どころ候補は memo の先頭（全角コロン）だけで見分ける / Highlight candidates are identified only by this memo prefix (full-width colon).
+  const CANDIDATE_PREFIX = '候補:';
+
+  // 前後の空白を除いた memo が候補の印で始まるか / Whether the trimmed memo starts with the candidate prefix.
+  function isCandidate(memo) {
+    return String(memo || '').trim().startsWith(CANDIDATE_PREFIX);
+  }
+
+  // sort 用: 候補を先に、同じ区分なら offset_sec 昇順、同値なら id 昇順
+  // Sort comparator: candidates first, then offset_sec ascending, then id ascending.
+  function candidateFirst(a, b) {
+    const rank = Number(isCandidate(b.memo)) - Number(isCandidate(a.memo));
+    if (rank) return rank;
+    const offset = Number(a.offset_sec) - Number(b.offset_sec);
+    if (offset) return offset;
+    const idA = String(a.id || '');
+    const idB = String(b.id || '');
+    return idA < idB ? -1 : idA > idB ? 1 : 0;
+  }
+
+  // Short 用 Sequence 名: Short_NN_本文（本文は候補の印と ' | ' 以降を除き、使えない文字を消して 20 文字まで）
+  // Short sequence name: Short_NN_body (body drops the candidate prefix and everything from ' | ', strips unsafe characters, max 20 chars).
+  function shortSequenceName(memo, n) {
+    const body = String(memo || '')
+      .replace(/^\s*候補:\s*/, '')
+      .split(' | ')[0]
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 20);
+    const name = 'Short_' + String(n).padStart(2, '0');
+    return body ? name + '_' + body : name;
+  }
+
   return {
+    CANDIDATE_PREFIX: CANDIDATE_PREFIX,
+    isCandidate: isCandidate,
+    candidateFirst: candidateFirst,
+    shortSequenceName: shortSequenceName,
     posToFractions: posToFractions,
     fractionsToPos: fractionsToPos,
     validLogin: validLogin,

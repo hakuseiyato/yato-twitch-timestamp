@@ -1098,4 +1098,25 @@ if (fs.existsSync(panelLib)) {
 // The web pages ship a copy of lib.js (made by `npm run build:web` in service/); fail if it is stale.
 assert.ok(fs.readFileSync(path.resolve(__dirname, '../service/web/js/lib.js')).equals(fs.readFileSync(panelLib)),
   'service/web/js/lib.js is stale: re-run `npm run build:web` in service/');
+
+// 候補の判定と並び / Candidate detection and ordering
+assert.strictEqual(TSLib.isCandidate('候補: 笑い | ハハ'), true);
+assert.strictEqual(TSLib.isCandidate('  候補:x'), true);
+assert.strictEqual(TSLib.isCandidate('候補 笑い'), false);
+assert.strictEqual(TSLib.isCandidate(''), false);
+assert.strictEqual(TSLib.isCandidate(null), false);
+const order = [
+  { id: 'y0000003', offset_sec: 10, memo: 'a' },
+  { id: 'y0000002', offset_sec: 50, memo: '候補: b' },
+  { id: 'y0000001', offset_sec: 5, memo: '候補: c' },
+  { id: 'y0000000', offset_sec: 10, memo: 'd' }
+].sort(TSLib.candidateFirst).map(s => s.id);
+assert.deepStrictEqual(order, ['y0000001', 'y0000002', 'y0000000', 'y0000003']);
+
+// Short Sequence の名前 / Short sequence names
+assert.strictEqual(TSLib.shortSequenceName('候補: 笑い・チャット急増 | ハハハ やばい', 3), 'Short_03_笑い・チャット急増');
+assert.strictEqual(TSLib.shortSequenceName('a/b:c*d?e"f<g>h|i', 12), 'Short_12_abcdefghi');
+assert.strictEqual(TSLib.shortSequenceName('   ', 1), 'Short_01');
+assert.strictEqual(TSLib.shortSequenceName('あいうえおかきくけこさしすせそたちつてとなにぬ', 7), 'Short_07_あいうえおかきくけこさしすせそたちつてと');
+assert.strictEqual(TSLib.shortSequenceName('x', 100), 'Short_100_x');
 console.log('all tests passed');
