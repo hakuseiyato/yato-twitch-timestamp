@@ -143,7 +143,7 @@
       if (candidate) {
         // 候補はバッジ + 印を外した本文 / Candidates: badge + memo without the prefix
         text = el('span', { class: 'row-text' }, [
-          el('span', { class: 'badge-candidate', text: '候補' }),
+          el('span', { class: 'badge-candidate', title: '候補 / Candidate', 'aria-label': '候補 / Candidate', text: '候補' }),
           s.memo.replace(TSLib.CANDIDATE_PATTERN, '')
         ]);
       } else {

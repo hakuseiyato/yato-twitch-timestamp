@@ -129,11 +129,11 @@ How candidates are chosen:
 Where candidates appear:
 
 - **Web (`/s/<id>`)**: candidates are violet vertical lines on the graph (human stamps stay amber). In the stamp list they have a violet left border, a "候補" badge, and the memo without its prefix. "候補を先に / Candidates first" lists them before the other stamps. Delete a wrong candidate as usual; the author or a channel owner can delete it.
-- **Premiere Pro panel**: after "同期", candidate markers are yellow. Yellow is reserved for candidates, so human markers cycle through the other colors.
+- **Premiere Pro panel**: candidate markers that "同期" creates are yellow. Sync colours only the markers it creates; markers already in the sequence keep their colour. Yellow is reserved for candidates, so new human markers cycle through the other colors.
 
 Creating Short sequences (Premiere Pro only):
 
-The button next to the frame-export button ("候補から Sequence を作る / Create Short sequences") opens a popover with "前 / Before (s)" (default 15), "後 / After (s)" (default 45), "人のマーカーも / Include human markers", and "作成 / Create". For every Peakaboo marker (one with a `[yts:…]` tag) that is a candidate, or every one when the check box is on, the panel sets the active sequence's In/Out to [marker − before, marker + after], creates a subsequence, names it `Short_NN_<memo without the prefix, up to 20 characters>` (made unique), removes the markers copied into it, and moves it to the `Peakaboo_Shorts` bin. The original In/Out points are restored afterwards. The before/after values are remembered between sessions. This has not been verified in a real Premiere Pro yet; 実機確認は Yato さんの手順書に従う.
+The button next to the frame-export button ("候補から Sequence を作る / Create Short sequences") opens a popover with "前 / Before (s)" (default 15), "後 / After (s)" (default 45), "人のマーカーも / Include human markers", and "作成 / Create". For every Peakaboo marker (one with a `[yts:…]` tag) that is a candidate, or every one when the check box is on, the panel sets the active sequence's In/Out to [marker − before, marker + after], creates a subsequence, names it `Short_NN_<memo without the prefix, up to 20 characters>` (made unique), removes the markers copied into it, and moves it to the `Peakaboo_Shorts` bin. The original In/Out points are restored afterwards, but only when the run changed them and both could be read; what happens when the sequence has no In/Out set is still to be confirmed in a real Premiere Pro. The before/after values are remembered between sessions. This has not been verified in a real Premiere Pro yet; 実機確認は Yato さんの手順書に従う.
 
 Tuning:
 

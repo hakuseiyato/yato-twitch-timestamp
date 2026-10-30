@@ -221,7 +221,22 @@ def build_signals(cfg: dict, db: np.ndarray, segments: list[dict],
 
 def own_alive_candidates(stamps: list[dict], by: str) -> list[dict]:
     """自分の生きている候補（--replace で墓標にするもの）/ The user's own alive candidates (tombstoned by --replace)."""
-    return [s for s in stamps if s.get('by') == by and not s.get('deleted') and signals.is_candidate(s.get('memo', ''))]
+    # サーバーは login を小文字で比べる / The server compares logins lowercased
+    me = by.lower()
+    return [s for s in stamps
+            if (s.get('by') or '').lower() == me and not s.get('deleted') and signals.is_candidate(s.get('memo', ''))]
+
+
+def stamps_for_blocking(stamps: list[dict], replaced_ids: set) -> list[dict]:
+    """除外と上限の計算に使うスタンプ（--replace で置き換える候補を抜く）。
+    Stamps used for exclusion and the cap, without the candidates being replaced by --replace."""
+    return [s for s in stamps if s.get('id') not in replaced_ids]
+
+
+def peaks_in_stream(peaks: list[signals.Peak], vod_offset_sec: float) -> list[signals.Peak]:
+    """配信時刻（t_vod + vod_offset_sec）が負のピークを落とす。サーバーは負の offset_sec を拒否するので枠を無駄にしない。
+    Drop peaks whose stream time is negative; the server rejects a negative offset_sec, so they would waste a slot."""
+    return [p for p in peaks if p[0] + vod_offset_sec >= 0]
 
 
 def run(args: argparse.Namespace) -> int:
@@ -275,7 +290,7 @@ def run(args: argparse.Namespace) -> int:
     # (earlier-deleted candidates stay blocked)
     tombstoned = own_alive_candidates(stamps, by) if args.replace else []
     replaced_ids = {s.get('id') for s in tombstoned}
-    blocked, existing_alive = signals.stamps_to_blocked([s for s in stamps if s.get('id') not in replaced_ids], vod_offset)
+    blocked, existing_alive = signals.stamps_to_blocked(stamps_for_blocking(stamps, replaced_ids), vod_offset)
 
     with Stage('score (signals)'):
         db = signals.rms_db(samples, sr)
@@ -284,7 +299,7 @@ def run(args: argparse.Namespace) -> int:
         score, contrib = signals.composite(sigs, weights)
         thr = signals.threshold(float(cfg['threshold']), weights, set(sigs))
         found = signals.peaks(score, thr, float(cfg['merge_sec']))
-        kept = signals.exclude(found, blocked, float(cfg['exclude_radius_sec']))
+        kept = peaks_in_stream(signals.exclude(found, blocked, float(cfg['exclude_radius_sec'])), vod_offset)
         picked = sorted(signals.select_candidates(kept, cap_total, existing_alive))
     log.info('信号 / signals: %s  しきい値 / threshold %.2f  ピーク / peaks %d -> 除外後 / after exclusion %d'
              ' -> 候補 / candidates %d（上限 / cap %d - 既存 / existing %d）',

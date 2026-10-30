@@ -54,7 +54,8 @@ class Client:
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(self.base_url + path, data=data, method=method)
         req.add_header('User-Agent', self.user_agent)
-        req.add_header('Authorization', 'Bearer ' + self._token)
+        # 別ホストへのリダイレクトにトークンを持ち越さない / Do not carry the token onto a cross-host redirect
+        req.add_unredirected_header('Authorization', 'Bearer ' + self._token)
         req.add_header('Accept', 'application/json')
         if data is not None:
             req.add_header('Content-Type', 'application/json')

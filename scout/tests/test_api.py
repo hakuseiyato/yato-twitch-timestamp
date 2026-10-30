@@ -36,6 +36,8 @@ class ApiClientTest(unittest.TestCase):
         req = urlopen.call_args[0][0]
         self.assertTrue(req.get_header('User-agent').startswith('Mozilla/5.0'))
         self.assertEqual(req.get_header('Authorization'), 'Bearer ytt_x')
+        # リダイレクト先へ持ち越さない / Not copied onto redirects
+        self.assertIn('Authorization', req.unredirected_hdrs)
 
     def test_default_user_agent(self):
         client = api.Client('https://x', 'ytt_x')
