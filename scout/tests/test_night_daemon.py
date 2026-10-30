@@ -221,6 +221,35 @@ class ParseArgsTest(unittest.TestCase):
         self.assertTrue(night.parse_args(['--vod', '2914625472', '--force']).force)
 
 
+class MissingStreamsTest(unittest.TestCase):
+    def test_none_streams_go_to_log_file(self):
+        saved = sys.stdout, sys.stderr
+        with tempfile.TemporaryDirectory() as d:
+            log_path = Path(d) / 'night.log'
+            try:
+                sys.stdout = sys.stderr = None
+                night.route_missing_streams(log_path)
+                print('進捗 / progress', file=sys.stderr)
+                sys.stdout.write('出力\n')
+                sys.stdout.flush()
+                sys.stderr.flush()
+                self.assertFalse(sys.stdout.closed)
+                self.assertFalse(sys.stderr.closed)
+            finally:
+                for stream in {sys.stdout, sys.stderr} - set(saved):
+                    if stream is not None:
+                        stream.close()
+                sys.stdout, sys.stderr = saved
+            text = log_path.read_text(encoding='utf-8')
+        self.assertIn('進捗 / progress', text)
+        self.assertIn('出力', text)
+
+    def test_existing_streams_are_kept(self):
+        saved = sys.stdout, sys.stderr
+        night.route_missing_streams(Path(tempfile.gettempdir()) / 'unused_night.log')
+        self.assertEqual((sys.stdout, sys.stderr), saved)
+
+
 class LockTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

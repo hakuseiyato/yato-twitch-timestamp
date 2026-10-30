@@ -508,6 +508,21 @@ def setup_logging() -> None:
             logger.addHandler(sh)
 
 
+def route_missing_streams(log_path: Path) -> None:
+    """pythonw では sys.stdout / sys.stderr が None になる。無い方を night.log への追記に差し替え、
+    依存（tqdm・faster-whisper・yt-dlp）の進捗出力が例外にならずログに残るようにする。
+    Under pythonw sys.stdout / sys.stderr are None; point the missing ones at night.log (append) so library
+    progress output (tqdm, faster-whisper, yt-dlp) lands in the log instead of raising."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    stream = open(log_path, 'a', encoding='utf-8', errors='replace', buffering=1)  # 行ごとに書く / line-buffered
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+
+
 def find_vod(login: str, vod_id: str) -> dict:
     """GQL の最新 VOD（20 本）から id で探す / Find the VOD by id among the newest 20 from GQL.
 
@@ -815,6 +830,9 @@ def main(argv: list[str] | None = None) -> int:
 def main_daemon(args: argparse.Namespace) -> int:
     """--daemon / --tick: 設定とトークンを読み、lock を取って回す。トークンが無ければ尋ねずに終える。
     --daemon / --tick: load config and token, take the lock and run; never prompt for a missing token."""
+    # setup_logging の後に呼ぶ（先だと画面用ハンドラも night.log に二重に書く）
+    # Called after setup_logging; earlier, the console handler would write every line to night.log twice
+    route_missing_streams(NIGHT_DIR / 'night.log')
     try:
         night_cfg = load_night_config(args.config)
         config_root = night_cfg['footage_root']
