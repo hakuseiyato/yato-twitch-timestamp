@@ -50,15 +50,17 @@ class Client:
         self._token = token
         self.user_agent = user_agent
 
-    def _request(self, method: str, path: str, body: dict | None = None) -> dict | list | None:
-        data = None if body is None else json.dumps(body, ensure_ascii=False).encode('utf-8')
+    def _request(self, method: str, path: str, body: dict | None = None,
+                 raw: bytes | None = None, content_type: str = 'application/json') -> dict | list | None:
+        # raw があれば本文はそのまま送る（Content-Length は urllib が付ける）/ raw is sent as-is (urllib sets Content-Length)
+        data = raw if raw is not None else (None if body is None else json.dumps(body, ensure_ascii=False).encode('utf-8'))
         req = urllib.request.Request(self.base_url + path, data=data, method=method)
         req.add_header('User-Agent', self.user_agent)
         # 別ホストへのリダイレクトにトークンを持ち越さない / Do not carry the token onto a cross-host redirect
         req.add_unredirected_header('Authorization', 'Bearer ' + self._token)
         req.add_header('Accept', 'application/json')
         if data is not None:
-            req.add_header('Content-Type', 'application/json')
+            req.add_header('Content-Type', content_type)
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT_SEC) as resp:
                 return json.loads(resp.read().decode('utf-8'))
@@ -77,10 +79,37 @@ class Client:
 
     def post(self, path: str, body: dict) -> dict:
         """JSON を POST して応答を返す / POST JSON and return the response."""
-        result = self._request('POST', path, body)
-        if not isinstance(result, dict):
-            raise ApiError(200, 'unexpected_response')
-        return result
+        return _expect_dict(self._request('POST', path, body))
+
+    def put(self, path: str, body: dict) -> dict:
+        """JSON を PUT して応答を返す / PUT JSON and return the response."""
+        return _expect_dict(self._request('PUT', path, body))
+
+    def patch(self, path: str, body: dict) -> dict:
+        """JSON を PATCH して応答を返す / PATCH JSON and return the response."""
+        return _expect_dict(self._request('PATCH', path, body))
+
+    def put_raw(self, path: str, data: bytes, content_type: str) -> dict:
+        """バイト列をそのまま PUT する（チャット JSON を読み直さずに送る）。
+        PUT bytes as-is (sends the chat JSON without re-encoding it).
+
+        Parameters
+        ----------
+        path : str
+            API のパス / API path.
+        data : bytes
+            本文 / Request body.
+        content_type : str
+            `Content-Type` ヘッダーの値 / Value of the `Content-Type` header.
+        """
+        return _expect_dict(self._request('PUT', path, raw=data, content_type=content_type))
+
+
+def _expect_dict(result: dict | list | None) -> dict:
+    """書き込み系の応答は dict のはず / Write responses must be a dict."""
+    if not isinstance(result, dict):
+        raise ApiError(200, 'unexpected_response')
+    return result
 
 
 def _error_code(e: urllib.error.HTTPError) -> str:

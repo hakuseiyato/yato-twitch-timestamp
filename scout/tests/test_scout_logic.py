@@ -1,8 +1,15 @@
 # scout.py の純粋な判定（--replace の除外・チャット遅れ・配信前ピーク）のテスト。I/O は使わない
 # Tests for scout.py's pure rules (--replace blocking, chat lag, pre-stream peaks); no I/O
+import argparse
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import scout  # noqa: E402
@@ -61,6 +68,80 @@ class PeaksInStreamTest(unittest.TestCase):
         peaks = [(10.0, 3.0), (30.0, 2.5), (31.0, 2.1)]
         self.assertEqual(scout.peaks_in_stream(peaks, -30.0), [(30.0, 2.5), (31.0, 2.1)])
         self.assertEqual(scout.peaks_in_stream(peaks, 0.0), peaks)
+
+
+class PrepareAudioSourceTest(unittest.TestCase):
+    def test_source_skips_fetch(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d)
+            (cache / 'transcript.json').write_text('[]', encoding='utf-8')
+            src = cache / 'vod.mp4'
+            with mock.patch('scout.audio.fetch_audio') as fetch,                     mock.patch('scout.audio.to_wav16k') as to_wav,                     mock.patch('scout.audio.load_wav', return_value=(np.zeros(16000), 16000)):
+                _samples, sr, segments = scout.prepare_audio('v1', cache, {}, source=str(src))
+        fetch.assert_not_called()
+        to_wav.assert_called_once_with(src, cache / 'audio16k.wav')
+        self.assertEqual((sr, segments), (16000, []))
+
+    def test_cached_wav_wins_over_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d)
+            (cache / 'transcript.json').write_text('[]', encoding='utf-8')
+            (cache / 'audio16k.wav').write_bytes(b'')
+            with mock.patch('scout.audio.fetch_audio') as fetch,                     mock.patch('scout.audio.to_wav16k') as to_wav,                     mock.patch('scout.audio.load_wav', return_value=(np.zeros(16000), 16000)):
+                scout.prepare_audio('v1', cache, {}, source=cache / 'vod.mp4')
+        fetch.assert_not_called()
+        to_wav.assert_not_called()
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_yes_and_source(self):
+        args = scout.parse_args(['--yes', '--source', 'D:/x/vod.mp4'])
+        self.assertTrue(args.yes)
+        self.assertEqual(args.source, 'D:/x/vod.mp4')
+
+    def test_defaults(self):
+        args = scout.parse_args([])
+        self.assertFalse(args.yes)
+        self.assertIsNone(args.source)
+
+
+class RunConfirmTest(unittest.TestCase):
+    """--yes の分岐: 確認を飛ばして送る / The --yes branch: skip the prompt and send."""
+
+    def _run(self, yes: bool, answer: str = 'n'):
+        cfg_path = Path(scout.__file__).with_name('scout.config.json')
+        cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
+        stream = {'stream_id': 's1', 'channel': cfg['channel'], 'vod_id': 'v1', 'vod_offset_sec': 0, 'started_at': '2026-10-30T10:00:00Z',
+                  'title': 't'}
+        responses = {
+            '/api/me': {'login': 'yato', 'channels': [{'login': cfg['channel']}]},
+            '/api/streams/s1': {'stream': stream},
+            '/api/streams/s1/stamps': {'records': []},
+            '/api/streams/s1/chat': None,
+        }
+        client = mock.Mock()
+        client.get.side_effect = lambda path: responses[path]
+        client.post.return_value = {'accepted': ['x'], 'rejected': []}
+        args = argparse.Namespace(config=str(cfg_path), server=None, top=None, cpu=False, stream='s1',
+                                  replace=False, dry_run=False, yes=yes)
+        with tempfile.TemporaryDirectory() as d:
+            cfg['cache_dir'] = d
+            with mock.patch('scout.load_config', return_value=cfg),                     mock.patch('scout.read_token', return_value='ytt_x'),                     mock.patch('scout.api.Client', return_value=client),                     mock.patch('scout.attach_log_file'),                     mock.patch('scout.prepare_audio', return_value=(np.zeros(16000 * 60), 16000, [])),                     mock.patch('scout.signals.peaks', return_value=[(30.0, 3.0)]),                     mock.patch('builtins.input', return_value=answer) as prompt:
+                code = scout.run(args)
+        return code, prompt, client
+
+    def test_yes_sends_without_prompt(self):
+        code, prompt, client = self._run(yes=True)
+        self.assertEqual(code, 0)
+        prompt.assert_not_called()
+        client.post.assert_called_once()
+        self.assertEqual(client.post.call_args[0][0], '/api/stamps')
+
+    def test_without_yes_asks_and_respects_no(self):
+        code, prompt, client = self._run(yes=False, answer='n')
+        self.assertEqual(code, 1)
+        prompt.assert_called_once()
+        client.post.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -162,14 +162,21 @@ class Stage:
         return False
 
 
-def prepare_audio(vod_id: str, cache: Path, whisper_cfg: dict) -> tuple[np.ndarray, int, list[dict]]:
+def prepare_audio(vod_id: str, cache: Path, whisper_cfg: dict,
+                  source: Path | str | None = None) -> tuple[np.ndarray, int, list[dict]]:
     """音声 → 16 kHz WAV → 文字起こし（それぞれキャッシュがあれば再利用）。
-    Audio -> 16 kHz WAV -> transcript, each reused from the cache when present."""
+    source（VOD の mp4）があれば yt-dlp を飛ばしてそれを変換する。
+    Audio -> 16 kHz WAV -> transcript, each reused from the cache when present.
+    With source (the VOD mp4), yt-dlp is skipped and that file is converted."""
     wav = cache / 'audio16k.wav'
     # 採点に音声のサンプルが要るので、元音声を省けるのは WAV がキャッシュにあるときだけ
     # Scoring needs the samples, so the source audio can be skipped only when the WAV is cached
     if wav.exists():
         log.info('stage yt-dlp / ffmpeg skipped: %s を再利用 / reused', wav.name)
+    elif source is not None:
+        log.info('stage yt-dlp skipped: %s を音声源にする / used as the audio source', source)
+        with Stage('ffmpeg (audio.to_wav16k)'):
+            audio.to_wav16k(Path(source), wav)
     else:
         with Stage('yt-dlp (audio.fetch_audio)'):
             src = audio.fetch_audio(vod_id, cache)
@@ -274,7 +281,7 @@ def run(args: argparse.Namespace) -> int:
     log.info('scout start %s stream=%s vod=%s', now_iso(), stream_id, vod_id)
     log.info('配信 / stream: %s %s  vod_offset_sec=%.1f', _jst(stream.get('started_at')), stream.get('title') or '', vod_offset)
 
-    samples, sr, segments = prepare_audio(str(vod_id), cache, whisper_cfg)
+    samples, sr, segments = prepare_audio(str(vod_id), cache, whisper_cfg, source=getattr(args, 'source', None))
 
     with Stage('fetch (api stamps + chat)'):
         stamps_body = client.get(f'/api/streams/{seg(stream_id)}/stamps')
@@ -327,10 +334,13 @@ def run(args: argparse.Namespace) -> int:
         log.info('dry-run のため送信しません（新規 %d 件・墓標 %d 件）/ dry-run: nothing sent (%d new, %d tombstones)',
                  len(records), len(tombstoned), len(records), len(tombstoned))
         return 0
-    answer = input('送信しますか？ / Send? y/N: ').strip().lower()
-    if answer != 'y':
-        log.info('送信しませんでした / Not sent')
-        return 1
+    if args.yes:
+        log.info('確認なしで送信します / sending without confirmation')
+    else:
+        answer = input('送信しますか？ / Send? y/N: ').strip().lower()
+        if answer != 'y':
+            log.info('送信しませんでした / Not sent')
+            return 1
     # 墓標と新しい候補を 1 回の POST で送る（確認前には何も書かない）
     # Tombstones and new candidates go in one POST; nothing is written before confirmation
     tombs = [{**s, 'deleted': True, 'updated_at': ts} for s in tombstoned]
@@ -357,6 +367,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument('--top', type=int, help='候補の上限（cap_total を上書き）/ candidate cap (overrides cap_total)')
     p.add_argument('--replace', action='store_true', help='自分の既存候補を消して選び直す / tombstone own candidates first')
     p.add_argument('--cpu', action='store_true', help='Whisper を CPU で動かす / run Whisper on CPU')
+    p.add_argument('--yes', action='store_true', help='確認なしで送る / send without confirmation')
+    p.add_argument('--source', help='VOD の mp4 を音声源にする / use this mp4 as the audio source')
     p.add_argument('--config', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scout.config.json'),
                    help='設定ファイル / config file')
     args = p.parse_args(argv)

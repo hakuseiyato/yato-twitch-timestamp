@@ -58,6 +58,42 @@ class ApiClientTest(unittest.TestCase):
         self.assertEqual(cm.exception.status, 403)
         self.assertEqual(cm.exception.error, 'forbidden')
 
+    def test_put_sends_json(self):
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(b'{"ok":true}')) as urlopen:
+            self.assertEqual(self.client.put('/api/streams/s1', {'title': 'あ'}), {'ok': True})
+        req = urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), 'PUT')
+        self.assertEqual(req.full_url, 'https://x/api/streams/s1')
+        self.assertEqual(req.get_header('Content-type'), 'application/json')
+        self.assertEqual(req.get_header('Authorization'), 'Bearer ytt_x')
+        self.assertEqual(json.loads(req.data.decode('utf-8')), {'title': 'あ'})
+
+    def test_patch_sends_json(self):
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(b'{"ok":true}')) as urlopen:
+            self.assertEqual(self.client.patch('/api/night/r1', {'state': 'done'}), {'ok': True})
+        req = urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), 'PATCH')
+        self.assertEqual(req.get_header('Content-type'), 'application/json')
+        self.assertEqual(json.loads(req.data.decode('utf-8')), {'state': 'done'})
+
+    def test_patch_rejects_non_dict(self):
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(b'[1]')):
+            with self.assertRaises(api.ApiError) as cm:
+                self.client.patch('/api/x', {})
+        self.assertEqual(cm.exception.error, 'unexpected_response')
+
+    def test_put_raw_sends_bytes_as_is(self):
+        raw = json.dumps({'comments': [[1, 'u', 'U', '草']]}, ensure_ascii=False).encode('utf-8')
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(b'{"ok":true}')) as urlopen:
+            self.assertEqual(self.client.put_raw('/api/streams/s1/chat', raw, 'application/json'), {'ok': True})
+        req = urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), 'PUT')
+        self.assertIs(req.data, raw)
+        self.assertEqual(req.get_header('Content-type'), 'application/json')
+        self.assertEqual(req.get_header('Authorization'), 'Bearer ytt_x')
+        self.assertIn('Authorization', req.unredirected_hdrs)
+        self.assertTrue(req.get_header('User-agent').startswith('Mozilla/5.0'))
+
 
 if __name__ == '__main__':
     unittest.main()
