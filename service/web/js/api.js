@@ -9,23 +9,23 @@ const YTSApi = (function () {
   const TWITCH_TOKEN_KEY = 'yts_twitch_token';
   const AUTHORIZE_URL = 'https://id.twitch.tv/oauth2/authorize';
 
-  // エラーコード → 日英の文言 / Error code -> bilingual message
+  // エラーコード → 画面の文言（日本語だけ）/ Error code -> on-screen message (Japanese only)
   const ERROR_TEXT = {
-    network: '通信できませんでした / Network error',
-    unauthorized: 'サインインが必要です / Sign-in required',
-    forbidden: '権限がありません / Not allowed',
-    csrf: '要求が拒否されました / Request rejected',
-    session_required: 'Web からのサインインが必要です / Web sign-in required',
-    bad_request: '入力が正しくありません / Invalid input',
-    not_found: '見つかりません / Not found',
-    exists: '既に存在します / Already exists',
-    last_owner: '最後の owner は外せません / The last owner cannot be removed',
-    client_mismatch: '別アプリのトークンです / Token belongs to another app',
-    twitch_unavailable: 'Twitch に接続できません。少し待って再試行してください / Twitch is unavailable, try again shortly',
-    invalid_label: 'ラベルが長すぎます / Label is too long',
-    payload_too_large: 'データが大きすぎます / Payload too large',
-    too_many_records: '件数が多すぎます / Too many records',
-    internal: 'サーバーエラー / Server error'
+    network: '通信できませんでした',
+    unauthorized: 'サインインが必要です',
+    forbidden: '権限がありません',
+    csrf: '要求が拒否されました',
+    session_required: 'Web からのサインインが必要です',
+    bad_request: '入力が正しくありません',
+    not_found: '見つかりません',
+    exists: '既に存在します',
+    last_owner: '最後の owner は外せません',
+    client_mismatch: '別アプリのトークンです',
+    twitch_unavailable: 'Twitch に接続できません。少し待ってから再試行してください',
+    invalid_label: 'ラベルが長すぎます',
+    payload_too_large: 'データが大きすぎます',
+    too_many_records: '件数が多すぎます',
+    internal: 'サーバーエラー'
   };
 
   // Worker の API を呼ぶ。非 2xx と通信失敗は {status, error, detail} を throw
@@ -63,7 +63,7 @@ const YTSApi = (function () {
   // 例外 → 画面に出す文言（コードも添える）/ Thrown value -> on-screen message (with the code)
   function errorText(err) {
     const code = (err && err.error) || 'unknown';
-    const base = ERROR_TEXT[code] || 'エラーが発生しました / Something went wrong';
+    const base = ERROR_TEXT[code] || 'エラーが発生しました';
     return base + ' (' + code + (err && err.status ? ' ' + err.status : '') + ')';
   }
 
@@ -168,22 +168,29 @@ const YTSApi = (function () {
     location.replace('/');
   }
 
-  // 見出しバー（#site-header）を描く。管理リンクは site admin か owner のときだけ
-  // Renders the header bar (#site-header). The admin link appears only for the site admin or an owner.
+  // 見出しバー（#site-header）を描く: マーク + 製品名、ナビ（現在地に下線）、頭文字のアバター + ログイン名 + サインアウト
+  // マークは /favicon.svg を CSS の背景で描く（el は SVG を組めないため）。管理リンクは site admin か owner のときだけ
+  // Renders the header bar (#site-header): mark + product name, nav (current page underlined), initial avatar + login + sign-out.
+  // The mark is /favicon.svg drawn as a CSS background (el cannot build SVG). The admin link appears only for the site admin or an owner.
   function renderHeader(me, current) {
     const header = document.getElementById('site-header');
     const canAdmin = me.site_admin || (me.channels || []).some(function (c) { return c.role === 'owner'; });
+    const login = me.login || '';
     const link = function (href, text) {
-      return el('a', { href: href, text: text, 'aria-current': current === href ? 'page' : null });
+      const here = current === href;
+      return el('a', { href: href, text: text, class: here ? 'on' : null, 'aria-current': here ? 'page' : null });
     };
     header.replaceChildren(
-      el('a', { class: 'brand', href: '/', text: 'Peakaboo' }),
-      el('nav', { class: 'site-nav', 'aria-label': 'メニュー / Menu' }, [
-        link('/', '配信一覧 / Streams'),
-        link('/me', 'マイページ / My page'),
-        canAdmin ? link('/admin', '管理 / Admin') : null,
-        el('span', { class: 'who', text: me.login }),
-        el('button', { type: 'button', class: 'secondary', text: 'サインアウト / Sign out', onclick: signOut })
+      el('a', { class: 'mark', href: '/' }, [el('span', { class: 'mark-icon', 'aria-hidden': 'true' }), 'Peakaboo']),
+      el('nav', { class: 'nav', 'aria-label': 'メニュー' }, [
+        link('/', '配信'),
+        link('/me', 'マイページ'),
+        canAdmin ? link('/admin', '管理') : null
+      ]),
+      el('div', { class: 'who' }, [
+        el('span', { class: 'av', 'aria-hidden': 'true', text: login.charAt(0).toUpperCase() }),
+        el('span', { text: login }),
+        el('button', { type: 'button', class: 'btn ghost', text: 'サインアウト', onclick: signOut })
       ])
     );
     header.hidden = false;

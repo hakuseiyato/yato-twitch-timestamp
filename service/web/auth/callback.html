@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>サインイン中 / Signing in — Peakaboo</title>
+<title>サインイン中 — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -14,11 +14,12 @@
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-<main>
-  <section class="card signin">
+<main class="doc">
+  <section class="signin">
+    <span class="mark" aria-hidden="true"><span class="mark-icon"></span></span>
     <h1>Peakaboo</h1>
-    <p class="status" id="callback-status" role="status">サインイン中… / Signing in…</p>
-    <a href="/" id="callback-back" hidden>トップへ戻る / Back to top</a>
+    <p class="status" id="callback-status" role="status">サインイン中…</p>
+    <a href="/" id="callback-back" hidden>トップへ戻る</a>
   </section>
 </main>
 
@@ -56,17 +57,17 @@
 
   const error = get('error');
   if (error) {
-    fail('サインインできませんでした / Sign-in failed: ' + (get('error_description') || error));
+    fail('サインインできませんでした: ' + (get('error_description') || error));
     return;
   }
   const state = get('state');
   if (!state || (state !== expected && state !== cookieState)) {
-    fail('サインインの確認に失敗しました（state 不一致）。もう一度サインインしてください / Sign-in check failed (state mismatch). Please sign in again.');
+    fail('サインインの確認に失敗しました（state 不一致）。もう一度サインインしてください。');
     return;
   }
   const token = params.get('access_token');
   if (!token) {
-    fail('トークンを受け取れませんでした / No token was returned');
+    fail('トークンを受け取れませんでした');
     return;
   }
 
@@ -74,7 +75,7 @@
     try { sessionStorage.setItem('yts_twitch_token', token); } catch (e) { /* storage blocked: Helix で再サインインを促す / Helix will ask to sign in again */ }
     location.replace('/');
   }, function (e) {
-    fail('サインインに失敗しました / Sign-in failed: ' + YTSApi.errorText(e));
+    fail('サインインに失敗しました: ' + YTSApi.errorText(e));
   });
 }());
 </script>

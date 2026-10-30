@@ -231,6 +231,8 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 .mark, .brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
 .mark:hover, .brand:hover { text-decoration: none; }
 .mark svg, .mark img { width: 22px; height: 22px; border-radius: 6px; box-shadow: var(--shadow-edge); }
+/* JS で描くマーク（/favicon.svg を背景に）/ Mark drawn from JS (/favicon.svg as the background) */
+.mark-icon { flex: none; width: 22px; height: 22px; border-radius: 6px; background: url(/favicon.svg) center / cover no-repeat; box-shadow: var(--shadow-edge); }
 .nav { display: flex; align-self: stretch; gap: 2px; margin-left: 4px; }
 .nav a { display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid transparent; color: var(--ink-2); font-size: 14px; font-weight: 500; }
 .nav a:hover { color: var(--ink); text-decoration: none; }
@@ -308,8 +310,10 @@ main.doc.pop { max-width: 560px; }
 /* 未サインイン（箱なし、左寄せ）/ Signed out (no box, left aligned) */
 .signin { max-width: 400px; margin: 12vh auto 0; }
 .card.signin { align-items: flex-start; padding: 0; border: 0; background: none; box-shadow: none; }
-.signin .mark svg, .signin .mark img { width: 48px; height: 48px; border-radius: 12px; }
+.signin .mark svg, .signin .mark img, .signin .mark-icon { width: 48px; height: 48px; border-radius: 12px; }
 .signin h1 { margin-top: 20px; }
+.signin .btn.pri { margin-top: 20px; padding: 0 18px; }
+.signin .status:not(:empty), .signin #callback-back { display: block; margin-top: 10px; }
 
 /* ---- フォーム（旧）/ Forms (old) ---- */
 .form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm); }
@@ -335,7 +339,25 @@ tr:hover td { background: var(--paper-3); }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.actions { width: 1%; white-space: nowrap; text-align: right; }
 
-/* ---- 配信一覧（行全体がリンク）/ Stream list (whole row is a link) ---- */
+/* ---- 配信一覧（表。タイトルのリンクを行全体に広げる）/ Stream list (table; the title link is stretched over the whole row) ---- */
+/* チャンネルの選択: 枠なしのインライン値 / Channel picker: borderless inline value */
+select.inline { min-height: 0; padding: 0 2px; border: 0; border-bottom: 1px dashed var(--ink-3); border-radius: 0; background: none; box-shadow: none; cursor: pointer; }
+select.inline:hover { border-bottom-color: var(--ink); }
+.meta .push { margin-left: auto; }
+.streams .vod-form { margin-top: 14px; }
+.streams .status:not(:empty) { margin-top: 12px; }
+.streams th { white-space: nowrap; }
+.streams td:first-child { color: var(--ink-2); font-size: 13.5px; white-space: nowrap; }
+.streams .t a { color: var(--ink); font-weight: 500; }
+.streams .t a:hover { color: var(--accent); text-decoration: none; }
+.streams .t a.untitled { color: var(--ink-2); font-weight: 400; }
+.streams .chat { white-space: nowrap; }
+.streams th.num, .streams td.num { color: var(--ink-2); text-align: right; }
+/* 行のどこを押してもタイトルのリンクで開く（JS なし）/ Clicking anywhere on a row follows the title link (no JS) */
+.streams tbody tr { position: relative; cursor: pointer; }
+.streams .t a::after { content: ""; position: absolute; inset: 0; }
+.streams tr.is-new td { background: var(--sel); }
+.streams tr.is-new td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .stream-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
 .stream-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr) 110px 220px; gap: var(--space-md); align-items: center; }
 .stream-head { padding: 9px 14px; background: var(--paper-3); color: var(--ink-2); font-size: 12px; font-weight: 500; }
@@ -496,6 +518,9 @@ main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var
   .stream-stamps { grid-column: 2; grid-row: 2; }
   .stream-chat { grid-column: 1 / -1; grid-row: 3; font-size: 13px; }
   .site-nav { margin-left: 0; }
+  /* 配信一覧の表: 日付とチャットも折り返して 4 列を収める / Stream table: let date and chat wrap so the four columns fit */
+  .streams th, .streams td { padding-right: 8px; padding-left: 8px; }
+  .streams td:first-child, .streams .chat { white-space: normal; }
   .card-head .push { flex-basis: 100%; margin-left: 0; }
 }
 

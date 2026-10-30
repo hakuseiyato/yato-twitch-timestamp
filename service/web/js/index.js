@@ -6,7 +6,7 @@
   const { api, errorText, formatDate, el, setStatus, busy, signInUrl, twitchToken, renderHeader } = YTSApi;
   const $ = function (id) { return document.getElementById(id); };
   const HELIX_VIDEOS = 'https://api.twitch.tv/helix/videos?id=';
-  const REAUTH_TEXT = 'もう一度サインインしてください / Please sign in again';
+  const REAUTH_TEXT = 'もう一度サインインしてください';
 
   let config = null;
 
@@ -20,7 +20,7 @@
     try {
       location.href = signInUrl(config.twitch_client_id);
     } catch (e) {
-      setStatus(statusNode, 'ブラウザの保存領域が使えません / Browser storage is unavailable', 'error');
+      setStatus(statusNode, 'ブラウザの保存領域が使えません', 'error');
     }
   }
 
@@ -36,7 +36,7 @@
       return;
     }
     if (!config.twitch_client_id) {
-      setStatus(status, 'サーバー設定が未完了 / Server not configured', 'error');
+      setStatus(status, 'サーバーの設定が済んでいません', 'error');
       return;
     }
     const button = $('signin-button');
@@ -49,24 +49,28 @@
   function chatCell(stream) {
     if (stream.chat_key) {
       const count = Number(stream.chat_count) || 0;
-      return el('span', { class: 'stream-chat chat-done', text: '取込済み / Fetched ✓ ' + count.toLocaleString() });
+      return el('td', { class: 'chat ok', text: '取り込み済み · ' + count.toLocaleString() + ' 件' });
     }
-    return el('span', { class: 'stream-chat chat-none', text: '未取込 / Not fetched' });
+    return el('td', { class: 'chat muted', text: '未取り込み' });
   }
 
+  // 1 配信 = 1 行。行全体のクリックはタイトルのリンクを CSS で広げて受ける（app.css の .streams .t a::after）
+  // One stream per row. A click anywhere on the row lands on the title link, stretched by CSS (.streams .t a::after in app.css).
   function streamRow(stream, highlightId) {
     const title = stream.title || '';
-    const row = el('a', {
-      class: 'stream-row stream-grid' + (stream.stream_id === highlightId ? ' is-new' : ''),
-      href: '/s/' + encodeURIComponent(stream.stream_id),
+    return el('tr', {
+      class: stream.stream_id === highlightId ? 'is-new' : null,
       'data-stream-id': stream.stream_id
     }, [
-      el('span', { class: 'stream-date', text: formatDate(stream.started_at) }),
-      el('span', { class: 'stream-title' + (title ? '' : ' untitled'), text: title || '（タイトルなし） / (untitled)' }),
-      el('span', { class: 'stream-stamps', text: String(Number(stream.stamp_count) || 0) }),
-      chatCell(stream)
+      el('td', { text: formatDate(stream.started_at) }),
+      el('td', { class: 't' }, el('a', {
+        class: title ? null : 'untitled',
+        href: '/s/' + encodeURIComponent(stream.stream_id),
+        text: title || '（タイトルなし）'
+      })),
+      chatCell(stream),
+      el('td', { class: 'num', text: String(Number(stream.stamp_count) || 0) })
     ]);
-    return el('li', null, row);
   }
 
   async function loadStreams(highlightId) {
@@ -74,7 +78,7 @@
     const list = $('stream-list');
     const status = $('streams-status');
     if (!channel) return;
-    setStatus(status, '読み込み中… / Loading…');
+    setStatus(status, '読み込み中…');
     let data;
     try {
       data = await api('/api/channels/' + encodeURIComponent(channel) + '/streams');
@@ -84,19 +88,20 @@
     }
     setStatus(status, '');
     const streams = data.streams || [];
+    $('streams-count').textContent = streams.length + ' 件';
     if (streams.length === 0) {
-      list.replaceChildren(el('p', { class: 'empty', text: 'まだ配信がありません。「VOD から登録」で追加できます / No streams yet. Add one with "Register from VOD".' }));
+      list.replaceChildren(el('div', { class: 'panel' }, el('p', { class: 'empty', text: 'まだ配信がありません。「＋ VOD から登録」で追加できます。' })));
       return;
     }
-    list.replaceChildren(
-      el('div', { class: 'stream-head stream-grid', 'aria-hidden': 'true' }, [
-        el('span', { text: '開始日時 / Started' }),
-        el('span', { text: 'タイトル / Title' }),
-        el('span', { class: 'stream-stamps', text: 'スタンプ / Stamps' }),
-        el('span', { text: 'チャット / Chat' })
-      ]),
-      el('ul', { class: 'stream-list' }, streams.map(function (s) { return streamRow(s, highlightId); }))
-    );
+    list.replaceChildren(el('div', { class: 'panel' }, el('table', null, [
+      el('thead', null, el('tr', null, [
+        el('th', { scope: 'col', text: '日付' }),
+        el('th', { scope: 'col', text: 'タイトル' }),
+        el('th', { scope: 'col', text: 'チャット' }),
+        el('th', { scope: 'col', class: 'num', text: 'スタンプ' })
+      ])),
+      el('tbody', null, streams.map(function (s) { return streamRow(s, highlightId); }))
+    ])));
     if (highlightId) {
       const row = list.querySelector('.is-new');
       if (row) row.scrollIntoView({ block: 'nearest' });
@@ -137,7 +142,7 @@
     vodError('');
     const vodId = YTSChat.parseVodId($('vod-input').value);
     if (!vodId) {
-      vodError('VOD の URL（twitch.tv/videos/…）か数字の ID を入力してください / Enter a VOD URL (twitch.tv/videos/…) or numeric ID');
+      vodError('VOD の URL（twitch.tv/videos/…）か数字の ID を入力してください');
       $('vod-input').classList.add('invalid');
       $('vod-input').focus();
       return;
@@ -146,16 +151,16 @@
       try {
         await loadConfig();
         if (!config.twitch_client_id) {
-          vodError('サーバー設定が未完了 / Server not configured');
+          vodError('サーバーの設定が済んでいません');
           return;
         }
         let video;
         try {
           video = await fetchHelixVideo(vodId);
         } catch (e) {
-          if (e && e.error === 'vod_not_found') vodError('VOD が見つかりません / VOD not found');
-          else if (e && e.error === 'twitch_api') vodError('Twitch API エラー / Twitch API error (' + e.status + ')');
-          else vodError('Twitch に接続できません / Could not reach Twitch');
+          if (e && e.error === 'vod_not_found') vodError('VOD が見つかりません');
+          else if (e && e.error === 'twitch_api') vodError('Twitch API のエラー (' + e.status + ')');
+          else vodError('Twitch に接続できません');
           return;
         }
         if (!video) {
@@ -179,7 +184,7 @@
         $('vod-input').value = '';
         setVodFormOpen(false);
         await loadStreams(stream.stream_id);
-        setStatus($('streams-status'), '登録しました / Registered', 'ok');
+        setStatus($('streams-status'), '登録しました', 'ok');
       } catch (e) {
         vodError(errorText(e));
       }
@@ -202,7 +207,7 @@
     if (channels.length === 0) {
       select.disabled = true;
       $('vod-toggle').disabled = true;
-      $('stream-list').replaceChildren(el('p', { class: 'empty', text: '参加しているチャンネルがありません。チャンネルの owner に追加を頼んでください / You are not a member of any channel. Ask a channel owner to add you.' }));
+      $('stream-list').replaceChildren(el('div', { class: 'panel' }, el('p', { class: 'empty', text: '参加しているチャンネルがありません。チャンネルの owner に追加を頼んでください。' })));
       return;
     }
     select.replaceChildren.apply(select, channels.map(function (c) {

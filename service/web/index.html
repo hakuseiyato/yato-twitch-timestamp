@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>配信一覧 / Streams — Peakaboo</title>
+<title>配信 — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -13,46 +13,50 @@
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-<header class="site-header" id="site-header" hidden></header>
+<header class="hdr" id="site-header" hidden></header>
 
-<main>
+<main class="doc">
   <!-- 読み込み中 / Loading -->
-  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+  <p class="status" id="boot-status" role="status">読み込み中…</p>
 
   <!-- 未サインイン / Signed out -->
-  <section class="card signin" id="signin-view" hidden>
+  <section class="signin" id="signin-view" hidden>
+    <span class="mark" aria-hidden="true"><span class="mark-icon"></span></span>
     <h1>Peakaboo</h1>
-    <p class="muted">配信のスタンプとチャットをチームで共有します / Share stream stamps and chat with your team</p>
-    <button type="button" class="primary" id="signin-button" hidden>Twitch でサインイン / Sign in with Twitch</button>
+    <p class="lead">配信のスタンプとチャットを、切り抜きの仲間と共有します。</p>
+    <button type="button" class="btn pri" id="signin-button" hidden>Twitch でサインイン</button>
     <p class="status" id="signin-status" role="status"></p>
+    <p class="help">サインインできるのは、チャンネルの owner に登録された人だけです。</p>
   </section>
 
   <!-- サインイン後 / Signed in -->
-  <section class="card" id="streams-view" hidden aria-labelledby="streams-heading">
-    <div class="card-head">
-      <h1 id="streams-heading">配信一覧 / Streams</h1>
-      <div class="field narrow push">
-        <label for="channel-select">チャンネル / Channel</label>
-        <select id="channel-select"></select>
-      </div>
-      <button type="button" class="secondary" id="vod-toggle" aria-expanded="false" aria-controls="vod-form">VOD から登録 / Register from VOD</button>
+  <section class="streams" id="streams-view" hidden aria-labelledby="streams-heading">
+    <div class="crumb">
+      <label for="channel-select">チャンネル</label>
+      <select class="inline" id="channel-select"></select>
+    </div>
+    <h1 id="streams-heading">配信</h1>
+    <div class="meta">
+      <span id="streams-count"></span>
+      <button type="button" class="btn ghost push" id="vod-toggle" aria-expanded="false" aria-controls="vod-form">＋ VOD から登録</button>
     </div>
 
-    <form id="vod-form" hidden novalidate>
+    <form class="vod-form" id="vod-form" hidden novalidate>
       <div class="form-row">
         <div class="field">
-          <label for="vod-input">VOD の URL か ID / VOD URL or ID</label>
+          <label for="vod-input">VOD の URL か ID</label>
           <input id="vod-input" name="vod" autocomplete="off" placeholder="https://www.twitch.tv/videos/1234567890" aria-describedby="vod-error">
         </div>
-        <button type="submit" class="primary" id="vod-submit">登録 / Register</button>
-        <button type="button" class="secondary" id="vod-cancel">閉じる / Close</button>
+        <button type="submit" class="btn pri" id="vod-submit">登録</button>
+        <button type="button" class="btn ghost" id="vod-cancel">閉じる</button>
       </div>
       <p class="field-error" id="vod-error" role="alert"></p>
-      <button type="button" class="primary" id="vod-resignin" hidden>Twitch でサインイン / Sign in with Twitch</button>
+      <button type="button" class="btn" id="vod-resignin" hidden>Twitch でサインイン</button>
     </form>
 
     <p class="status" id="streams-status" role="status"></p>
     <div id="stream-list"></div>
+    <p class="help">行をクリックで配信を開きます。VOD から登録すると、チャットの取り込みと Scout の対象になります。</p>
   </section>
 </main>
 

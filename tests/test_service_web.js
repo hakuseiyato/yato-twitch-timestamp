@@ -132,6 +132,12 @@ assert.strictEqual(Chat.nextCursor({ hasNextPage: false, cursor: 'x' }), null);
 const emptyNext = Chat.parseCommentsPage([{ data: { video: { comments: { edges: [], pageInfo: { hasNextPage: true } } } } }]);
 assert.throws(() => Chat.nextCursor(emptyNext), /Next page cursor missing/);
 
+// エラー文は日本語だけ、末尾にコードと status / Error text is Japanese only, with the code and status appended
+assert.strictEqual(Api.errorText({ error: 'network', status: 0 }), '通信できませんでした (network)');
+assert.strictEqual(Api.errorText({ error: 'forbidden', status: 403 }), '権限がありません (forbidden 403)');
+assert.strictEqual(Api.errorText({ error: 'http_502', status: 502 }), 'エラーが発生しました (http_502 502)');
+assert.strictEqual(Api.errorText(null), 'エラーが発生しました (unknown)');
+
 // fetchVodChat: 1 ページ目は offset 0、以降は cursor・Client-ID は TwitchDownloader の値・重複なし
 // fetchVodChat: page 1 by offset 0, then cursors; Client-ID is TwitchDownloader's; no duplicates
 function fakeNode(id, sec) {
