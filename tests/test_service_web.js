@@ -86,7 +86,10 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
   const calls = [];
   const arcs = [];
   const gradients = [];
-  const ctx = { setTransform() {}, clearRect() {}, fillText() {}, beginPath() {}, fill() {}, fillStyle: '', globalAlpha: 1,
+  const texts = [];
+  const ctx = { setTransform() {}, clearRect() {}, beginPath() {}, fill() {}, fillStyle: '', globalAlpha: 1, textAlign: 'left',
+    measureText(text) { return { width: text.length * 6 }; },
+    fillText(text, x, y) { texts.push({ text: text, x: x, y: y, align: ctx.textAlign }); },
     createLinearGradient() { const g = { stops: [], addColorStop(at, color) { g.stops.push([at, color]); } }; gradients.push(g); return g; },
     arc(x, y, r) { arcs.push({ x: x, y: y, r: r, fill: ctx.fillStyle }); },
     fillRect(x, y, w, h) { calls.push({ x: x, y: y, w: w, fill: ctx.fillStyle }); } };
@@ -119,6 +122,13 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
     assert.strictEqual(attrs['aria-valuetext'], '未選択');
     g.select(1);
     assert.strictEqual(attrs['aria-valuetext'], '00:00:30 – 00:01:00 · 2 件');
+    // 端のスタンプの丸は canvas の内側に収める（中心 x は [4, 幅 - 4]）/ Edge stamp dots stay inside the canvas (centre x in [4, width - 4])
+    arcs.length = 0;
+    g.setData({ counts: Uint32Array.from([1, 2, 3]), binSec: 30, stamps: [{ offset_sec: 0 }, { offset_sec: 90 }] });
+    assert.deepStrictEqual(arcs.map(a => a.x), [4, 296]);
+    // 「最大 N」は右上に右寄せ / 最大 N sits right-aligned at the top right
+    const maxLabel = texts.filter(t => t.text.startsWith('最大 ')).pop();
+    assert.deepStrictEqual([maxLabel.x, maxLabel.y, maxLabel.align], [296, 2, 'right']);
   } finally {
     delete global.window; delete global.document; delete global.getComputedStyle; delete global.TSLib;
   }

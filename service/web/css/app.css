@@ -1,4 +1,5 @@
-/* Hallmark · genre: modern-minimal · design-system: design.md · designed-as-app */
+/* Hallmark · macrostructure: Workbench (/s) + Long Document (other pages) · genre: modern-minimal · design-system: design.md · designed-as-app */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
 /* Web ページ共通のスタイル。設計の正はリポジトリ直下の design.md。色の値は tests/test_web_tokens.js のコントラスト基準が正 */
 /* Shared styles for the web pages. design.md at the repo root is the source of truth; tests/test_web_tokens.js owns the colour values */
 
@@ -51,29 +52,6 @@
   --radius: 6px;
   --radius-lg: 8px;
   --ease: 120ms ease;
-
-  /* 旧ページ用のエイリアス（Task 8 で削除）。var() なので明るい地でも自動で追従する
-     Legacy aliases for the old page CSS (removed in task 8); var() makes them follow the light theme too */
-  --bg: var(--paper);
-  --surface: var(--paper-2);
-  --surface-raised: var(--paper-3);
-  --field: var(--paper-2);
-  --text: var(--ink);
-  --link: var(--accent);
-  --error: var(--err);
-  --highlight: var(--sel);
-  --accent-strong: var(--accent-fill);
-  --content-w: 960px;
-  --text-sm: 12px;
-  --text-base: 15px;
-  --text-lg: 18px;
-  --text-xl: 22px;
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 24px;
-  --space-2xl: 40px;
 }
 
 /* ---- トークン: 明るい地（OS の設定に追従）/ Tokens: light theme (follows the OS setting) ---- */
@@ -129,9 +107,9 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; transition: color var(--ease); }
-a:hover { text-decoration: underline; text-underline-offset: 3px; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 h1, h2, h3 { margin: 0; font-style: normal; line-height: 1.25; }
-h1 { margin-top: 4px; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+h1 { min-width: 0; margin-top: 4px; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
 h2 { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
 p { margin: 0; }
 
@@ -149,7 +127,7 @@ svg.i { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; fill
 
 /* ---- 操作部品 / Controls ---- */
 button, select, input { font: inherit; color: inherit; }
-/* 既定のボタン。旧ページの素の <button> と .secondary も同じ見た目 / Default button; bare <button> and .secondary on the old pages look the same */
+/* 既定のボタン。素の <button> も同じ見た目 / Default button; a bare <button> looks the same */
 button, .btn {
   display: inline-flex;
   align-items: center;
@@ -173,23 +151,24 @@ button, .btn {
 button:hover:not(:disabled), .btn:hover { background: var(--paper-4); text-decoration: none; }
 /* 主ボタン（1 ページに 1 つ）。hover は暗くして白字のコントラストを保つ
    Primary button (one per page); hover darkens so the white label keeps its contrast */
-.btn.pri, .primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); box-shadow: var(--shadow-edge), var(--shine); }
-.btn.pri:hover, .primary:hover:not(:disabled) { background: var(--accent-fill); filter: brightness(0.92); }
+.btn.pri { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); box-shadow: var(--shadow-edge), var(--shine); }
+.btn.pri:hover { background: var(--accent-fill); filter: brightness(0.92); }
 .btn.ghost { border-color: transparent; background: none; color: var(--ink-2); box-shadow: none; }
 .btn.ghost:hover { background: var(--paper-3); color: var(--ink); }
-.btn.danger, .danger { color: var(--err); }
-/* 削除の hover は --paper-3 の地で 4.5:1 を保つ（--paper-4 だと明るい地で割る）。.btn.ghost:hover より後に置く
-   Danger hover stays on --paper-3 to keep 4.5:1 (--paper-4 falls short in the light theme); must follow .btn.ghost:hover */
-.btn.danger:hover, .danger:hover:not(:disabled) { background: var(--paper-3); color: var(--err); }
-.danger:hover:not(:disabled) { border-color: var(--err); }
+.btn.danger { color: var(--err); }
+/* 削除の hover は --paper-3 の地で 4.5:1 を保つ（--paper-4 だと明るい地で割る）。.btn.ghost:hover より後に置く。枠は赤くしない（ghost の枠なしを保つ）
+   Danger hover stays on --paper-3 to keep 4.5:1 (--paper-4 falls short in the light theme); must follow .btn.ghost:hover. No red border (ghost stays borderless) */
+.btn.danger:hover:not(:disabled) { background: var(--paper-3); color: var(--err); }
 /* 文字だけのボタン（リンクの見た目。配信ページのメタ行の「再取り込み」「別ウィンドウ」）
    Text-only button that looks like a link (re-import and pop-out in the stream page's meta line) */
 .link-btn { display: inline; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--accent); font-size: inherit; font-weight: inherit; line-height: inherit; }
-.link-btn:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 3px; }
+.link-btn:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 2px; }
+/* 押している間は内側の影で沈ませる（動きなし）/ Pressed: an inset shadow sinks the button (no motion) */
+.btn:active:not(:disabled) { box-shadow: var(--shadow-inset); }
 button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
 button[aria-busy="true"] { cursor: progress; }
 
-/* 入力。旧ページの素の <select> / <input> も同じ見た目 / Inputs; bare <select> and <input> on the old pages look the same */
+/* 入力。素の <select> / <input> も同じ見た目 / Inputs; bare <select> and <input> look the same */
 /* :where() で詳細度を 0 に保ち、input.invalid などが勝てるようにする / :where() keeps specificity at zero so input.invalid and friends win */
 .in, select, input:where(:not([type="checkbox"]):not([type="radio"])) {
   min-width: 0;
@@ -218,8 +197,8 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
 }
-.mark, .brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
-.mark:hover, .brand:hover { text-decoration: none; }
+.mark { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.mark:hover { text-decoration: none; }
 .mark svg, .mark img { width: 22px; height: 22px; border-radius: 6px; box-shadow: var(--shadow-edge); }
 /* JS で描くマーク（/favicon.svg を背景に）/ Mark drawn from JS (/favicon.svg as the background) */
 .mark-icon { flex: none; width: 22px; height: 22px; border-radius: 6px; background: url(/favicon.svg) center / cover no-repeat; box-shadow: var(--shadow-edge); }
@@ -231,19 +210,13 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 .who .av { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--av-grad); color: var(--on-brand); font-size: 11px; font-weight: 600; }
 .who button { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--ink-2); font-weight: 400; }
 .who button:hover:not(:disabled) { background: none; color: var(--ink); }
-/* 旧ヘッダーのナビ（Task 2 で .nav へ）/ Old header nav (moves to .nav in task 2) */
-.site-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); margin-left: auto; font-size: 14px; }
-.site-nav a { display: inline-flex; align-items: center; min-height: var(--control-h); color: var(--ink-2); font-weight: 500; white-space: nowrap; }
-.site-nav a:hover { color: var(--ink); text-decoration: none; }
-.site-nav a[aria-current="page"] { color: var(--ink); font-weight: 600; }
 
 /* ---- 本文の型 / Page types ---- */
 main {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xl);
+  gap: 24px;
   width: 100%;
-  max-width: var(--content-w);
   margin: 0 auto;
   padding: 32px 28px 56px;
 }
@@ -264,11 +237,13 @@ main.doc.pop { max-width: 560px; }
 .sec-h { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); color: var(--ink); font-size: 13px; font-weight: 600; letter-spacing: .01em; }
 .sec-h .cnt { color: var(--ink-3); font-weight: 500; }
 .sec-h .r { display: flex; align-items: center; gap: 16px; margin-left: auto; color: var(--ink-2); font-size: 13px; font-weight: 400; }
+/* 見出しと補助操作のラベルは途中で折らない（狭い幅では行ごと折り返す）/ Headings and side-control labels never break mid-label (narrow widths wrap whole items) */
+.sec-h h2, .sec-h .r > label { white-space: nowrap; }
 .help { margin: 10px 0 0; color: var(--ink-2); font-size: 13.5px; }
 .row { display: flex; align-items: center; gap: 8px; }
 
 /* ---- 面 / Surfaces ---- */
-.panel, .listbox, .gwrap, .card {
+.panel, .listbox, .gwrap {
   border: 1px solid var(--rule);
   border-radius: var(--radius-lg);
   background: var(--paper-2);
@@ -277,41 +252,29 @@ main.doc.pop { max-width: 560px; }
 .panel { margin-top: 12px; overflow: hidden; }
 .listbox { margin-top: 10px; overflow: hidden; }
 .gwrap { margin-top: 12px; padding: 14px 16px 10px; }
-/* 旧ページの箱（Task 2〜5 で .sec / .panel へ）/ Old page box (moves to .sec / .panel in tasks 2-5) */
-.card { display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-lg); }
-.stack { display: flex; flex-direction: column; gap: var(--space-xl); }
-.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
-.card-head h2 { min-width: 0; overflow-wrap: anywhere; }
-.card-head .push { margin-left: auto; }
 
 /* 注記: 左 3px の青線 / Note: 3px blue left rule */
 .note { margin-top: 14px; padding: 12px 16px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); background: var(--paper-2); box-shadow: var(--shadow); }
-/* 1 回だけ表示するトークン（旧）/ Token shown once (old) */
-.reveal { display: flex; flex-direction: column; gap: var(--space-sm); padding: 12px 16px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); background: var(--paper-2); }
-.reveal .warning { color: var(--warn); }
-.reveal .form-row input { flex: 1 1 260px; }
 /* 403 などの案内 / Notices such as 403 */
-.notice { padding: var(--space-xl) var(--space-lg); border: 1px solid var(--rule); border-radius: var(--radius-lg); background: var(--paper-2); color: var(--ink-2); text-align: center; }
-.notice strong { display: block; margin-bottom: var(--space-sm); color: var(--ink); font-size: var(--text-lg); }
+.notice { padding: 24px 16px; border: 1px solid var(--rule); border-radius: var(--radius-lg); background: var(--paper-2); color: var(--ink-2); text-align: center; }
+.notice strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 18px; }
 
 /* 候補のチップ（文字でも示す）/ Candidate chip (labelled in text too) */
-.chip, .badge-candidate { display: inline-flex; align-items: center; margin-right: 7px; padding: 1px 7px; border: 1px solid var(--cand); border-radius: 999px; background: var(--cand-soft); color: var(--cand); font-size: 11px; font-weight: 600; letter-spacing: .02em; line-height: 1.4; vertical-align: 1px; }
+.chip { display: inline-flex; align-items: center; margin-right: 7px; padding: 1px 7px; border: 1px solid var(--cand); border-radius: 999px; background: var(--cand-soft); color: var(--cand); font-size: 11px; font-weight: 600; letter-spacing: .02em; line-height: 1.4; vertical-align: 1px; }
 /* インライン値: 破線の下線 / Inline value: dashed underline */
 .inline { border-bottom: 1px dashed var(--ink-3); color: var(--ink); cursor: text; transition: border-color var(--ease); }
 .inline:hover { border-bottom-color: var(--ink); }
 
 /* 未サインイン（箱なし、左寄せ）/ Signed out (no box, left aligned) */
 .signin { max-width: 400px; margin: 12vh auto 0; }
-.card.signin { align-items: flex-start; padding: 0; border: 0; background: none; box-shadow: none; }
 .signin .mark svg, .signin .mark img, .signin .mark-icon { width: 48px; height: 48px; border-radius: 12px; }
 .signin h1 { margin-top: 20px; }
 .signin .btn.pri { margin-top: 20px; padding: 0 18px; }
 .signin .status:not(:empty), .signin #callback-back { display: block; margin-top: 10px; }
 
-/* ---- フォーム（旧）/ Forms (old) ---- */
-.form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm); }
-.field { display: flex; flex: 1 1 200px; flex-direction: column; gap: var(--space-xs); min-width: 0; }
-.field.narrow { flex: 0 1 240px; }
+/* ---- フォーム（VOD の登録・選択）/ Forms (VOD registration and picker) ---- */
+.form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.field { display: flex; flex: 1 1 200px; flex-direction: column; gap: 4px; min-width: 0; }
 .field label { color: var(--ink-2); font-size: 13px; }
 .field-error { min-height: 1.5em; color: var(--err); font-size: 13px; }
 
@@ -322,7 +285,6 @@ main.doc.pop { max-width: 560px; }
 .status:empty { min-height: 0; }
 
 /* ---- 表 / Tables ---- */
-.table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 11px 14px; border-bottom: 1px solid var(--rule-2); text-align: left; vertical-align: middle; }
 th { padding: 9px 14px; border-bottom-color: var(--rule); background: var(--paper-3); color: var(--ink-2); font-size: 12px; font-weight: 500; letter-spacing: .02em; }
@@ -338,7 +300,7 @@ td.actions { width: 1%; white-space: nowrap; text-align: right; }
 select.inline, input.inline { min-height: 0; padding: 0 2px; border: 0; border-bottom: 1px dashed var(--ink-3); border-radius: 0; background: none; box-shadow: none; }
 select.inline { cursor: pointer; }
 select.inline:hover, input.inline:hover, input.inline:focus { border-bottom-color: var(--ink); }
-input.inline { width: 6ch; text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
+input.inline { width: 7ch; text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
 input.inline::-webkit-inner-spin-button, input.inline::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; appearance: none; }
 input.inline.invalid { border-bottom: 1px solid var(--err); }
 .meta .push { margin-left: auto; }
@@ -357,48 +319,22 @@ input.inline.invalid { border-bottom: 1px solid var(--err); }
 .streams tbody tr { cursor: pointer; }
 .streams tr.is-new td { background: var(--sel); }
 .streams tr.is-new td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.stream-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
-.stream-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr) 110px 220px; gap: var(--space-md); align-items: center; }
-.stream-head { padding: 9px 14px; background: var(--paper-3); color: var(--ink-2); font-size: 12px; font-weight: 500; }
-.stream-row {
-  min-height: var(--control-h);
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--rule-2);
-  color: var(--ink);
-  text-decoration: none;
-  transition: background-color var(--ease);
-}
-.stream-row:hover { background: var(--paper-3); text-decoration: none; }
-.stream-row.is-new { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
-.stream-date, .stream-stamps { font-variant-numeric: tabular-nums; }
-.stream-date { color: var(--ink-2); font-size: 13.5px; }
-.stream-title { min-width: 0; overflow: hidden; color: var(--ink); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
-.stream-title.untitled { color: var(--ink-2); font-weight: 400; }
-.stream-stamps { color: var(--ink-2); text-align: right; }
-.stream-chat { white-space: nowrap; }
-.chat-done { color: var(--ok); }
-.chat-none { color: var(--ink-2); }
-.empty { padding: var(--space-xl) var(--space-md); color: var(--ink-2); text-align: center; }
-/* LIVE の印 / Live marker */
-.live { display: inline-flex; align-items: center; gap: 6px; color: var(--err); font-size: 12px; font-weight: 600; }
-.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 20%, transparent); }
+.empty { padding: 24px 12px; color: var(--ink-2); text-align: center; }
 
 /* ---- 配信ページ / Stream page ---- */
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; margin-top: 10px; color: var(--ink-2); font-size: 13.5px; }
 .meta b { color: var(--ink); font-weight: 500; }
-.chat-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
-.chat-state .chat-none { color: var(--warn); font-weight: 600; }
-.import-panel { display: flex; flex-direction: column; gap: var(--space-sm); padding: 12px 16px; border: 1px solid var(--rule); border-radius: var(--radius-lg); background: var(--paper-3); }
+.import-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border: 1px solid var(--rule); border-radius: var(--radius-lg); background: var(--paper-3); }
 .import-panel select { width: 100%; }
 #import-progress { align-items: center; }
 #import-progress .status { font-variant-numeric: tabular-nums; }
 
 /* グラフは canvas が描く。地は面の色をそのまま見せる / The canvas draws the graph; its background is the surface colour */
-.graph, .graph-wrap { position: relative; height: 190px; }
-.graph canvas, .graph-wrap canvas { display: block; width: 100%; height: 100%; border-radius: var(--radius); background: transparent; cursor: pointer; }
+.graph { position: relative; height: 190px; }
+.graph canvas { display: block; width: 100%; height: 100%; border-radius: var(--radius); background: transparent; cursor: pointer; }
 .graph-tooltip {
   position: absolute;
-  top: var(--space-xs);
+  top: 4px;
   padding: 4px 8px;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
@@ -417,14 +353,13 @@ input.inline.invalid { border-bottom: 1px solid var(--err); }
 /* メタ行の下に開く VOD の選択・進み具合・状態 / VOD picker, progress and status lines that open below the meta line */
 #stream-view .import-panel, #import-progress { margin-top: 14px; }
 #stream-view > .status:not(:empty), #stream-view > .field-error:not(:empty), #settings-status:not(:empty) { margin-top: 10px; }
-.selection-row { align-items: center; }
 #selection-label { font-variant-numeric: tabular-nums; }
 
 /* コメント | スタンプ: 1100px 以上で 3:2 の横並び、未満は 1 列（タブ）。幅の切り替えは stream.js の syncLayout がパネルの hidden で行う
    Comments | stamps: 3:2 at 1100px and up, one column (tabs) below. stream.js syncLayout switches the panels' hidden attribute */
 .lists { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; margin-top: 28px; }
 /* 狭い幅で隠れているパネルの列は、見出しと枠ごと畳む / In narrow mode, the column of a hidden panel folds away with its heading and box */
-.lists > div:has(> .listbox > [role="tabpanel"][hidden]) { display: none; }
+.lists > div:has(> .listbox > .list-scroll[hidden]) { display: none; }
 @media (min-width: 1100px) {
   .lists { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 }
@@ -459,7 +394,7 @@ input.inline.invalid { border-bottom: 1px solid var(--err); }
    Inside a box the panel scrolls (stream.js / comments.js set its scrollTop); ul.rows only grows */
 .listbox > .list-scroll { max-height: 440px; }
 .list-scroll > ul.rows { max-height: none; overflow: visible; }
-ul.rows, .row-list { margin: 0; padding: 0; list-style: none; }
+ul.rows { margin: 0; padding: 0; list-style: none; }
 ul.rows { max-height: 440px; overflow: auto; }
 ul.rows li {
   display: grid;
@@ -476,45 +411,21 @@ ul.rows li:hover { background: var(--paper-3); }
 ul.rows li .t { color: var(--ink-2); font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 ul.rows li .u { overflow: hidden; color: var(--ink-2); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
 ul.rows.st li { grid-template-columns: 68px minmax(0, 1fr); }
-/* 候補は左 3px 紫、人は左 3px 琥珀。選択（hi）は後に書いて上書きさせる
-   Candidates get a 3px violet stripe, people a 3px amber one; hi comes later so it wins */
+/* 候補は左 3px 紫、人は左 3px 琥珀。選択（in-bin）と点滅（flash）は後に書いて上書きさせる
+   Candidates get a 3px violet stripe, people a 3px amber one; in-bin and flash come later so they win */
 ul.rows li.cand { box-shadow: inset 3px 0 0 var(--cand); }
 ul.rows li.human { box-shadow: inset 3px 0 0 var(--warn); }
 ul.rows li { overflow-wrap: anywhere; }
 ul.rows li.empty { display: block; }
 /* 選択範囲（in-bin）と別ウィンドウの点滅（flash）。JS が付けるクラス名は契約 / Selection (in-bin) and the pop-out flash; the JS class names are a contract */
-ul.rows li.hi, ul.rows li.in-bin { background: var(--sel); }
+ul.rows li.in-bin { background: var(--sel); }
 ul.rows li.flash { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+/* 選択地の上では --ink-3 が 4.5:1 を割るので --ink-2 に上げる / On the selection fill --ink-3 drops below 4.5:1, so it steps up to --ink-2 */
+ul.rows li.in-bin :is(.by, .faint), ul.rows li.flash :is(.by, .faint) { color: var(--ink-2); }
 ul.rows .by { color: var(--ink-3); }
 /* × は本物の <button>。既定のボタンの枠・地・高さを外して文字だけにする / The × is a real <button>; drop the default button frame, fill and height so only the glyph shows */
 ul.rows .x { float: right; min-height: 0; padding: 0 4px; border: 0; background: none; box-shadow: none; color: var(--ink-3); font-weight: 400; line-height: inherit; cursor: pointer; }
 ul.rows .x:hover { color: var(--err); }
-
-/* 旧マークアップの行（stream.js / comments.js が .row-time .row-name .row-text の 3 セルを出す）。
-   配置は Task 1 より前と同じ 3 列のまま、色だけ新トークン。Task 3 で ul.rows へ移す
-   Legacy rows (stream.js / comments.js emit three cells: .row-time .row-name .row-text).
-   Layout stays the pre-task-1 three columns, only colours use the new tokens; task 3 moves them to ul.rows */
-.row-list li {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 160px) minmax(0, 1fr);
-  gap: var(--space-md);
-  padding: var(--space-xs) var(--space-md);
-  border-bottom: 1px solid var(--rule-2);
-  border-left: 3px solid transparent;
-  transition: background-color var(--ease);
-}
-.row-list li:hover { background: var(--paper-3); }
-.row-time { color: var(--ink-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.row-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
-.row-text { overflow-wrap: anywhere; }
-/* 候補は左線を紫に。選択（in-bin）と点滅（flash）はこれより後に書いて上書きさせる
-   Candidates get a violet left border; in-bin and flash come later so they override it */
-.row-list li.candidate { border-left-color: var(--cand); }
-.row-list li.in-bin { border-left-color: var(--accent); background: var(--sel); }
-.row-list li.flash { border-left-color: var(--warn); background: var(--sel); }
-.row-list li.empty { display: block; border-left: 0; }
-/* 「候補を先に」の切り替え / "Candidates first" toggle */
-.sort-toggle { display: flex; align-items: center; gap: var(--space-sm); min-height: var(--control-h); padding: 0 14px; color: var(--ink-2); font-size: 13px; cursor: pointer; }
 
 /* ---- 切り離したコメント一覧: 一覧が窓の高さいっぱいに伸びる / Detached comment list: the list fills the window height ---- */
 main.doc.pop { display: flex; flex-direction: column; gap: 0; height: 100vh; padding-top: 20px; padding-bottom: 20px; }
@@ -543,35 +454,20 @@ main.doc .sec .panel { overflow-x: auto; }
 main.doc .sec .status:not(:empty), main.doc .sec .field-error:not(:empty) { margin-top: 10px; }
 main.doc .sec .field-error:empty { min-height: 0; }
 
-/* ---- 切り離したコメント一覧（旧）/ Detached comment list (old) ---- */
-main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var(--space-sm); }
-.popout-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); }
-.popout-bar h1 { min-width: 0; margin: 0; font-size: var(--text-lg); overflow-wrap: anywhere; }
-.popout-bar a { display: inline-flex; align-items: center; min-height: var(--control-h); margin-left: auto; white-space: nowrap; }
-.popout .list-scroll { flex: 1 1 0; min-height: 0; max-height: none; border: 1px solid var(--rule); border-radius: var(--radius-lg); background: var(--paper-2); }
-.popout .field-error:empty { min-height: 0; }
-
 /* ---- 狭い画面 / Narrow screens ---- */
 @media (max-width: 640px) {
-  main { padding: var(--space-lg) var(--space-lg) var(--space-xl); }
-  .hdr, .site-header { padding: 0 var(--space-lg); }
-  .graph, .graph-wrap { height: 140px; }
-  .row-list li, ul.rows li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 var(--space-sm); }
+  main { padding: 16px 16px 24px; }
+  .hdr, .site-header { padding: 0 16px; }
+  .graph { height: 140px; }
+  ul.rows li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; }
   ul.rows.st li { grid-template-columns: 64px minmax(0, 1fr); }
-  .row-text, ul.rows:not(.st) li > :nth-child(3) { grid-column: 1 / -1; }
+  ul.rows:not(.st) li > :nth-child(3) { grid-column: 1 / -1; }
   .pop .sec-h .in { width: 140px; }
-  .stream-head { display: none; }
-  /* 2 行に畳む: タイトル / 日時・数 / Fold into two lines: title / date and counts */
-  .stream-grid { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md); }
-  .stream-title { grid-column: 1 / -1; grid-row: 1; }
-  .stream-date { grid-column: 1; grid-row: 2; }
-  .stream-stamps { grid-column: 2; grid-row: 2; }
-  .stream-chat { grid-column: 1 / -1; grid-row: 3; font-size: 13px; }
-  .site-nav { margin-left: 0; }
+  .sec-h { flex-wrap: wrap; row-gap: 8px; }
+  .sec-h .r { flex-wrap: wrap; gap: 4px 16px; }
   /* 配信一覧の表: 日付とチャットも折り返して 4 列を収める / Stream table: let date and chat wrap so the four columns fit */
   .streams th, .streams td { padding-right: 8px; padding-left: 8px; }
   .streams td:first-child, .streams .chat { white-space: normal; }
-  .card-head .push { flex-basis: 100%; margin-left: 0; }
 }
 
 /* ---- タッチ操作では 44px / 44px controls for touch ---- */

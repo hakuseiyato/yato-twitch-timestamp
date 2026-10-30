@@ -99,6 +99,7 @@ const YTSGraph = (function () {
         candidate: cssVar(canvas, '--cand') || '#c99af0',
         axis: cssVar(canvas, '--rule') || '#2c2c31',
         label: cssVar(canvas, '--ink-3') || '#8b8b88',
+        surface: cssVar(canvas, '--paper-2') || '#1c1c1f',
         font: cssVar(canvas, '--font-body')
       };
       ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -139,8 +140,10 @@ const YTSGraph = (function () {
         if (x < 0 || x > cssWidth) continue;
         const lineX = Math.min(x, cssWidth - 2);
         ctx.fillRect(lineX, 0, 2, baseY);
+        // 丸は端で切れないよう中心を [DOT_R, 幅 - DOT_R] に収める / Clamp the dot centre to [DOT_R, width - DOT_R] so it is never clipped at the edges
+        const dotX = Math.max(DOT_R, Math.min(lineX + 1, cssWidth - DOT_R));
         ctx.beginPath();
-        ctx.arc(lineX + 1, DOT_R, DOT_R, 0, Math.PI * 2);
+        ctx.arc(dotX, DOT_R, DOT_R, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -157,9 +160,15 @@ const YTSGraph = (function () {
         ctx.textAlign = i === 0 ? 'left' : 'center';
         if (x + 30 < cssWidth) ctx.fillText(TSLib.formatTimecode(i * binSec), x, baseY + 6);
       }
-      // 最大件数 / Maximum count
-      ctx.textAlign = 'left';
-      ctx.fillText('最大 ' + max.toLocaleString(), 4, 2);
+      // 最大件数は右上に右寄せ（序盤のスタンプの丸に隠れない）。終盤の線とは面の色の下地で重ならない
+      // Maximum count, right-aligned at the top right (early stamps' dots cannot cover it); a surface-coloured backing keeps late stamp lines off it
+      const maxText = '最大 ' + max.toLocaleString();
+      const maxW = ctx.measureText(maxText).width;
+      ctx.fillStyle = colors.surface;
+      ctx.fillRect(cssWidth - maxW - 8, 0, maxW + 8, 16);
+      ctx.fillStyle = colors.label;
+      ctx.textAlign = 'right';
+      ctx.fillText(maxText, cssWidth - 4, 2);
     }
 
     // 画面の x 座標 → ビン番号（範囲外は null）/ Client x -> bin index (null outside)

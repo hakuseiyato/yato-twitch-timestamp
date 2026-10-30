@@ -27,7 +27,7 @@
   // 送信状態の印 / Sync state marks
   const SYNC_MARKS = {
     sent: '送信済',
-    pending: '未送信',
+    pending: '送信待ち',
     failed: '失敗',
     unsent: '未送信'
   };
@@ -141,7 +141,7 @@
     if (!serverUrl) return;
     const pending = currentState.pending || [];
     const failed = currentState.failed || [];
-    elements.pendingCount.textContent = '未送信 ' + pending.length + ' 件';
+    elements.pendingCount.textContent = '送信待ち ' + pending.length + ' 件';
     const lastSync = currentState.lastSync;
     const at = lastSync && lastSync.at ? new Date(lastSync.at) : null;
     if (at && Number.isFinite(at.getTime())) {

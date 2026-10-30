@@ -64,12 +64,10 @@
 
   // ---- 見出し / Heading ----
 
-  // 配信の長さ: チャットの length_sec、無ければ最後のスタンプ。どちらも無ければ null
-  // Stream length: the chat's length_sec, else the last stamp; null when neither is known
+  // 配信の長さ: チャットの length_sec。チャットが無ければ null（最後のスタンプは長さではないので使わない）
+  // Stream length: the chat's length_sec; null without chat (the last stamp is not the length, so it is not used)
   function streamLengthSec() {
-    if (chat && Number(chat.length_sec) > 0) return Number(chat.length_sec);
-    if (!stamps.length) return null;
-    return stamps.reduce(function (m, s) { return Math.max(m, Number(s.offset_sec) || 0); }, 0);
+    return chat && Number(chat.length_sec) > 0 ? Number(chat.length_sec) : null;
   }
 
   // パンくず・h1・メタ行（開始と長さ / VOD / チャットの状態 / スタンプ数と候補数）
@@ -369,10 +367,23 @@
     scrollToSelection();
   }
 
-  // 広い幅では両パネルの hidden を外し（タブは CSS で隠れる）、狭い幅では選んでいるタブの 1 枚に戻す
-  // Wide: clears hidden on both panels (the tabs are hidden by CSS); narrow: back to the selected tab's single panel
+  // 広い幅では両パネルの hidden を外し（タブは CSS で隠れる）、狭い幅では選んでいるタブの 1 枚に戻す。
+  // タブが隠れている間はパネルを tabpanel にしない（読み上げに見えないタブを指させない）
+  // Wide: clears hidden on both panels (the tabs are hidden by CSS); narrow: back to the selected tab's single panel.
+  // While the tabs are hidden the panels are not tabpanels (screen readers are not pointed at invisible tabs)
   function syncLayout() {
-    if (wideQuery.matches) {
+    const wide = wideQuery.matches;
+    for (const key of ['comments', 'stamps']) {
+      const panel = $('panel-' + key);
+      if (wide) {
+        panel.removeAttribute('role');
+        panel.removeAttribute('aria-labelledby');
+      } else {
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-labelledby', 'tab-' + key);
+      }
+    }
+    if (wide) {
       $('panel-comments').hidden = false;
       $('panel-stamps').hidden = false;
       scrollToSelection();

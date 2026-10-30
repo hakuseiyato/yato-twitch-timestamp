@@ -24,9 +24,11 @@ assert.ok(/<details id="failed-details"/.test(html));
 for (const type of ['syncNow', 'clearFailed']) assert.ok(script.indexOf("type: '" + type + "'") >= 0, 'popup.js does not send ' + type);
 for (const name of ['TSLib.reasonText', 'TSLib.recordSyncState']) assert.ok(script.indexOf(name) >= 0, 'popup.js does not use ' + name);
 // 4 つの送信状態すべてに印がある / Every one of the four sync states has a mark
-for (const mark of ["sent: '送信済'", "pending: '未送信'", "failed: '失敗'", "unsent: '未送信'"]) {
+for (const mark of ["sent: '送信済'", "pending: '送信待ち'", "failed: '失敗'", "unsent: '未送信'"]) {
   assert.ok(script.indexOf(mark) >= 0, 'popup.js is missing the mark ' + mark);
 }
+// 件数の行は「送信待ち N 件」（未送信は一度も送っていない記録の印）/ The count line reads 送信待ち N 件 (未送信 marks never-sent records)
+assert.ok(script.indexOf("'送信待ち ' + pending.length + ' 件'") >= 0, 'popup.js count line must read 送信待ち N 件');
 assert.ok(script.indexOf('currentState.synced') >= 0, 'popup.js does not pass synced to recordSyncState');
 // データを HTML として流し込まない / Never inject data as HTML
 assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML/.test(script), 'popup.js must not use innerHTML');

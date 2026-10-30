@@ -47,7 +47,7 @@ const YTSServer = (function () {
     }
   }
 
-  // lib が要る関数で呼ぶ。読めていなければ日英の Error / Called by functions that need lib; throws a bilingual Error when it is missing
+  // lib が要る関数で呼ぶ。読めていなければ日本語の Error / Called by functions that need lib; throws a Japanese Error when it is missing
   function requireLib() {
     if (!lib) throw new Error('lib.js を読み込めませんでした。panel\\install.ps1 を再実行してください');
     return lib;
