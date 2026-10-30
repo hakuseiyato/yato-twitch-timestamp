@@ -254,7 +254,14 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       // 日付 YYMMDD は配信の開始日（JST）。無ければ ExtendScript 側が Sequence 名の先頭 6 桁を使う
       // The YYMMDD date is the stream's start day (JST); without it the ExtendScript side uses the sequence name's leading 6 digits.
       const group = selectedGroup();
-      const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, dateTag: dateTagOf(group && group.started_at), parentBin: 'Sequence' }) + ')', true);
+      const params = { preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, dateTag: dateTagOf(group && group.started_at), parentBin: 'Sequence' };
+      // その日の bin に既に Short があれば、二重に作る前に確認する / Confirm before adding to a day bin that already holds Shorts
+      const probe = await callHost('ytsCreateShorts(' + hostLiteral(Object.assign({ dryRun: true }, params)) + ')', true);
+      if (probe.existing > 0 && !window.confirm(probe.bin + ' には既に ' + probe.existing + ' 本あります。さらに ' + probe.targets + ' 本作りますか？')) {
+        setStatus('作成を中止しました', '');
+        return;
+      }
+      const out = await callHost('ytsCreateShorts(' + hostLiteral(params) + ')', true);
       // skipped = 範囲が取れない、または Sequence を作れなかったマーカー / skipped = markers with no usable range or whose sequence could not be created
       if (!out.created) {
         setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : ''), '');

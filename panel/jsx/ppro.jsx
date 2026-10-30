@@ -763,6 +763,7 @@ function ytsCreateShorts(p) {
     var parentBin;
     var binPath;
     var origId;
+    var existing;
     // Premiere 26 で確実に効くのは ticks で作った Time / A Time built from ticks is the form known to work in Premiere 26.
     var toTime = function (sec) {
         var t = new Time();
@@ -804,6 +805,25 @@ function ytsCreateShorts(p) {
         allSequences = app.project.sequences;
         for (i = 0; i < allSequences.numSequences; i += 1) usedNames["n_" + allSequences[i].name] = true;
 
+        // 既にその日の bin に Short があれば番号はその続きから。p.dryRun なら件数だけ返す（二重作成の確認用）
+        // Numbering continues after Shorts already in the day's bin. p.dryRun only reports the count (used to confirm before duplicating).
+        existing = 0;
+        root = app.project.rootItem;
+        parentBin = null;
+        if (parentBinName) {
+            for (j = 0; j < root.children.numItems; j += 1) {
+                child = root.children[j];
+                if (child && child.type === ProjectItemType.BIN && child.name === parentBinName) { parentBin = child; break; }
+            }
+        }
+        if (!parentBin) { parentBin = root; binPath = binName; }
+        for (j = 0; j < parentBin.children.numItems; j += 1) {
+            child = parentBin.children[j];
+            if (child && child.type === ProjectItemType.BIN && child.name === binName) { bin = child; break; }
+        }
+        if (bin) existing = bin.children.numItems;
+        if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length });
+
         for (i = 0; i < targets.length; i += 1) {
             inSec = Math.max(0, targets[i].t - preSec);
             outSec = Math.min(seqEndSec, targets[i].t + postSec);
@@ -811,7 +831,7 @@ function ytsCreateShorts(p) {
                 skipped += 1;
                 continue;
             }
-            n = created + 1;
+            n = existing + created + 1;
             name = namePrefix + ytsShortName(targets[i].name, n);
             while (usedNames["n_" + name]) {
                 n += 1;
@@ -844,32 +864,8 @@ function ytsCreateShorts(p) {
                 }
             } catch (markerError) {}
 
-            if (!bin) {
-                // 親 bin（既定 Sequence）があればその下、無ければルートに日付 bin を置く / Under the parent bin (default Sequence) when it exists, else at the root
-                root = app.project.rootItem;
-                parentBin = null;
-                if (parentBinName) {
-                    for (j = 0; j < root.children.numItems; j += 1) {
-                        child = root.children[j];
-                        if (child && child.type === ProjectItemType.BIN && child.name === parentBinName) {
-                            parentBin = child;
-                            break;
-                        }
-                    }
-                }
-                if (!parentBin) {
-                    parentBin = root;
-                    binPath = binName;
-                }
-                for (j = 0; j < parentBin.children.numItems; j += 1) {
-                    child = parentBin.children[j];
-                    if (child && child.type === ProjectItemType.BIN && child.name === binName) {
-                        bin = child;
-                        break;
-                    }
-                }
-                if (!bin) bin = parentBin.createBin(binName) || null;
-            }
+            // 日付 bin は親 bin（既定 Sequence）の下、親が無ければルート。無ければここで作る / The day bin sits under the parent (default Sequence), else at the root; created here when missing
+            if (!bin) bin = parentBin.createBin(binName) || null;
             if (bin && sub.projectItem) sub.projectItem.moveBin(bin);
         }
         result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped, bin: binPath });
