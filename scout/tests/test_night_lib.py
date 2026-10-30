@@ -26,6 +26,8 @@ class FootageNameTest(unittest.TestCase):
         self.assertEqual(night_lib.choose_footage_name('261030', 'VALORANT', set(), {'261030_VALORANT'}), ('261030_VALORANT_vod', True))
     def test_second_vod_same_title(self):
         self.assertEqual(night_lib.choose_footage_name('261030', 'VALORANT', {'261030_VALORANT'}, {'261030_VALORANT'}), ('261030_VALORANT_2', False))
+    def test_vod_name_taken_by_other_job(self):
+        self.assertEqual(night_lib.choose_footage_name('261030', 'X', {'261030_X_vod'}, {'261030_X', '261030_X_vod'}), ('261030_X_2', False))
 
 class StartTest(unittest.TestCase):
     NOW = datetime(2026, 10, 30, 8, 0, tzinfo=timezone.utc)
@@ -46,6 +48,9 @@ class StartTest(unittest.TestCase):
     def test_no_live_seen_in_24h(self):
         state = dict(self.STATE, last_live=dict(self.STATE['last_live'], seen_at='2026-10-28T06:10:00Z'))
         self.assertIsNone(night_lib.should_start(state, {'stream': None, 'videos': [self.VOD]}, self.NOW))
+    def test_naive_created_at_is_utc(self):
+        naive = dict(self.VOD, createdAt='2026-10-30T06:03:22')
+        self.assertEqual(night_lib.should_start(self.STATE, {'stream': None, 'videos': [naive]}, self.NOW), '2914625472')
 
 class OffsetTest(unittest.TestCase):
     def test_offset(self):
@@ -71,6 +76,11 @@ class SrtTest(unittest.TestCase):
         self.assertIn('00:00:03,000 --> 00:00:20,000', srt)
     def test_empty(self):
         self.assertEqual(night_lib.srt_for_window(self.SEG, 1000.0, 15, 45), '')
+    def test_whitespace_only_text_gives_no_cue(self):
+        self.assertEqual(night_lib.srt_for_window([{'start': 100.0, 'end': 101.0, 'text': '  '}], 105.0, 15, 45), '')
+    def test_non_positive_line_chars_means_no_wrap(self):
+        srt = night_lib.srt_for_window([{'start': 100.0, 'end': 101.0, 'text': 'あ' * 25}], 105.0, 15, 45, 0)
+        self.assertIn('\r\n' + 'あ' * 25 + '\r\n', srt)
 
 class StepsTest(unittest.TestCase):
     def test_next_step(self):
@@ -83,6 +93,9 @@ class StepsTest(unittest.TestCase):
                 {'stream_id': 'd', 'night_requested_at': '2026-10-30T13:00:00Z', 'night_status': '処理中: 候補'},
                 {'stream_id': 'e'}]
         self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['a', 'c'])
+    def test_pending_compares_times_not_text(self):
+        rows = [{'stream_id': 'm', 'night_requested_at': '2026-10-30T13:00:00.500Z', 'night_done_at': '2026-10-30T13:00:00Z'}]
+        self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['m'])
     def test_status_texts(self):
         self.assertEqual(night_lib.status_text_running('render', 3, 10), '処理中: チャット動画 3/10')
         self.assertEqual(night_lib.status_text_running('vod'), '処理中: VOD 保存')

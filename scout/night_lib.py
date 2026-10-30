@@ -30,8 +30,10 @@ _MAX_AUTO_OFFSET = 120.0
 
 
 def _parse_iso(iso: str) -> datetime:
-    """'2026-10-30T06:03:22Z' を aware datetime にする / Parse an ISO UTC string into an aware datetime."""
-    return datetime.fromisoformat(iso.replace('Z', '+00:00'))
+    """'2026-10-30T06:03:22Z' を aware datetime にする。時差の無い時刻は UTC とみなす。
+    Parse an ISO string into an aware datetime; a naive timestamp is taken as UTC."""
+    parsed = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def sanitize_title(title: str, limit: int = 30) -> str:
@@ -50,13 +52,15 @@ def choose_footage_name(date_tag: str, title: str, taken: set[str], on_disk: set
     """素材の basename（拡張子なし）と、既存ファイルを使うかを返す。
     Return the footage basename (no extension) and whether an existing file is used.
 
-    他 job が使った名前は _2, _3… で避け、その名前がフォルダに既にあれば（人が置いたもの）_vod を付けて True。
-    Names taken by other jobs get _2, _3…; if that name is already on disk (put there by a person), add _vod and return True.
+    番号が先: 名前かその _vod 形が他 job に使われていれば _2, _3… と上げる。決まった名前がフォルダに既にあれば
+    （人が置いたもの）_vod を付けて True。これで _vod 形も他 job と重ならない。
+    Counter first: raise _2, _3… while the name or its _vod form is taken by another job. If the chosen name is
+    already on disk (put there by a person), add _vod and return True, so the _vod form never collides either.
     """
     base = f'{date_tag}_{title}'
     name = base
     n = 2
-    while name in taken:
+    while name in taken or f'{name}_vod' in taken:
         name = f'{base}_{n}'
         n += 1
     if name in on_disk:
@@ -135,8 +139,10 @@ def srt_for_window(segments: list[dict], t_vod: float, pre: float, post: float, 
 
     Short とチャット動画は VOD 時刻 max(0, t−pre) から始まるので、字幕もそこを 0 秒にする。
     The Short and the chat render start at VOD time max(0, t−pre), so captions use that as 0 s.
-    窓より前から続く発話の開始は 0 に詰め、終わりは窓で切らない。本文は line_chars 文字ごとに折り返す。
-    Speech starting before the window is clamped to 0; ends are not cut to the window. Text wraps every line_chars characters.
+    窓より前から続く発話の開始は 0 に詰め、終わりは窓で切らない。本文は line_chars 文字ごとに折り返す（0 以下なら折り返さない）。
+    空白だけの発話は飛ばす。
+    Speech starting before the window is clamped to 0; ends are not cut to the window. Text wraps every line_chars
+    characters (no wrapping when line_chars <= 0). Whitespace-only segments are skipped.
     """
     origin = max(0.0, t_vod - pre)
     stop = t_vod + post
@@ -144,14 +150,17 @@ def srt_for_window(segments: list[dict], t_vod: float, pre: float, post: float, 
     for seg in segments:
         if not (seg['end'] > origin and seg['start'] < stop):
             continue
+        text = seg['text'].strip()
+        if not text:
+            continue
         start = max(0.0, seg['start'] - origin)
         end = seg['end'] - origin
-        text = seg['text'].strip()
-        lines = [text[i:i + line_chars] for i in range(0, len(text), line_chars)] or ['']
+        width = line_chars if line_chars > 0 else len(text)
+        lines = [text[i:i + width] for i in range(0, len(text), width)]
         cues.append('\r\n'.join([str(len(cues) + 1), f'{_srt_time(start)} --> {_srt_time(end)}', *lines]) + '\r\n\r\n')
     if not cues:
         return ''
-    return '﻿' + ''.join(cues)
+    return '\ufeff' + ''.join(cues)
 
 
 def build_plan(*, date_tag: str, stream_id: str, vod_id: str, title: str, footage: str, footage_existing: bool,
@@ -187,14 +196,14 @@ def pending_requests(rows: list[dict]) -> list[dict]:
     """「今夜やる」要求が開いていて、まだ処理中でない配信行。
     Stream rows with an open run-tonight request that are not already running.
 
-    要求が完了より新しい（完了が無いも含む）ものを開いているとみなす。ISO UTC なので文字列比較でよい。
-    A request is open when newer than the last done (or never done); ISO UTC strings compare correctly as text.
+    要求が完了より新しい（完了が無いも含む）ものを開いているとみなす。ミリ秒の有無が混ざるので時刻で比べる。
+    A request is open when newer than the last done (or never done); compared as datetimes since milliseconds may differ.
     """
     pending = []
     for row in rows:
         requested = row.get('night_requested_at')
         done = row.get('night_done_at')
-        if not requested or (done and requested <= done):
+        if not requested or (done and _parse_iso(requested) <= _parse_iso(done)):
             continue
         if str(row.get('night_status') or '').startswith('処理中'):
             continue
