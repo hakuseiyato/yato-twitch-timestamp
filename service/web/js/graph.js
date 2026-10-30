@@ -1,8 +1,8 @@
 'use strict';
 
-// コメント密度グラフ（canvas）。棒 = ビンごとのコメント数、縦線 = スタンプ、選択ビンは --accent
+// コメント密度グラフ（canvas）。棒 = ビンごとのコメント数（--bar-top → --bar-bot のグラデーション）、縦線 = スタンプ（上端に丸）、選択ビンは --accent
 // ブラウザでは素の識別子 YTSGraph（classic script の const）、Node では require で読む（labelStep のテスト用）
-// Comment density graph (canvas). Bars = comments per bin, vertical lines = stamps, the selected bin in --accent.
+// Comment density graph (canvas). Bars = comments per bin (--bar-top to --bar-bot gradient), vertical lines = stamps (a dot on top), the selected bin in --accent.
 // A bare YTSGraph identifier in the browser (classic-script const), require() in Node (to test labelStep).
 const YTSGraph = (function () {
   // 目盛りの候補（秒）/ Candidate label intervals (seconds)
@@ -10,6 +10,8 @@ const YTSGraph = (function () {
   const LABEL_MIN_PX = 72;
   const AXIS_H = 20;
   const TOP_PAD = 16;
+  // スタンプ線の上端の丸の半径 / Radius of the dot on top of a stamp line
+  const DOT_R = 4;
 
   // 目盛りの間隔（ビン数）。binSec の倍数のきりの良い秒で、間隔が LABEL_MIN_PX 以上になる最小のもの
   // Label step in bins: the smallest round number of seconds (a multiple of binSec) whose spacing is at least LABEL_MIN_PX.
@@ -60,7 +62,7 @@ const YTSGraph = (function () {
 
     function binText(bin) {
       const n = counts[bin] || 0;
-      return rangeText(bin) + ' / ' + n.toLocaleString() + ' 件 / ' + n.toLocaleString() + ' comments';
+      return rangeText(bin) + ' · ' + n.toLocaleString() + ' 件';
     }
 
     // キーボード操作の読み上げ用 / For screen readers while using the keyboard
@@ -68,7 +70,7 @@ const YTSGraph = (function () {
       canvas.setAttribute('aria-valuemax', String(counts.length - 1));
       if (selected === null) {
         canvas.removeAttribute('aria-valuenow');
-        canvas.setAttribute('aria-valuetext', '未選択 / Nothing selected');
+        canvas.setAttribute('aria-valuetext', '未選択');
       } else {
         canvas.setAttribute('aria-valuenow', String(selected));
         canvas.setAttribute('aria-valuetext', binText(selected));
@@ -89,13 +91,14 @@ const YTSGraph = (function () {
     function draw() {
       if (!cssWidth) return;
       const colors = {
-        bar: cssVar(canvas, '--graph-bar') || '#5a6b7d',
-        hover: cssVar(canvas, '--graph-bar-hover') || '#7d8fa3',
-        accent: cssVar(canvas, '--accent'),
-        stamp: cssVar(canvas, '--warning'),
-        candidate: cssVar(canvas, '--candidate') || '#c792ea',
-        axis: cssVar(canvas, '--border'),
-        label: cssVar(canvas, '--secondary'),
+        bar: cssVar(canvas, '--bar-top') || '#6f8fb8',
+        barBottom: cssVar(canvas, '--bar-bot') || '#3b4d66',
+        hover: cssVar(canvas, '--bar-hover') || '#8fb0d8',
+        accent: cssVar(canvas, '--accent') || '#79b8f7',
+        stamp: cssVar(canvas, '--warn') || '#e6b65a',
+        candidate: cssVar(canvas, '--cand') || '#c99af0',
+        axis: cssVar(canvas, '--rule') || '#2c2c31',
+        label: cssVar(canvas, '--ink-3') || '#8b8b88',
         font: cssVar(canvas, '--font-body')
       };
       ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -105,12 +108,20 @@ const YTSGraph = (function () {
       let max = 0;
       for (const n of counts) if (n > max) max = n;
 
-      // 棒（1px 未満でも隙間なしで描く）/ Bars (drawn without gaps even when under 1px)
+      // 棒（1px 未満でも隙間なしで描く）。通常は棒ごとに上 --bar-top・下 --bar-bot のグラデーション、hover と選択は単色
+      // Bars (drawn without gaps even when under 1px). Normally a per-bar --bar-top to --bar-bot gradient; hover and selection are solid
       const gap = step >= 4 ? 1 : 0;
       for (let i = 0; i < counts.length; i++) {
         if (!counts[i] && i !== selected) continue;
         const h = max ? Math.max(1, (counts[i] / max) * plotH) : 0;
-        ctx.fillStyle = i === selected ? colors.accent : i === hovered ? colors.hover : colors.bar;
+        if (i === selected) ctx.fillStyle = colors.accent;
+        else if (i === hovered) ctx.fillStyle = colors.hover;
+        else {
+          const fill = ctx.createLinearGradient(0, baseY - h, 0, baseY);
+          fill.addColorStop(0, colors.bar);
+          fill.addColorStop(1, colors.barBottom);
+          ctx.fillStyle = fill;
+        }
         // 選択ビンは件数 0 でも全高の帯で示す / The selected bin shows as a full-height band even at zero comments
         if (i === selected) {
           ctx.globalAlpha = 0.25;
@@ -120,12 +131,17 @@ const YTSGraph = (function () {
         if (h) ctx.fillRect(i * step, baseY - h, Math.max(1, step - gap), h);
       }
 
-      // スタンプの縦線。候補（呼び出し側が s.candidate を付ける）は --candidate
-      // Stamp lines. Candidates (the caller sets s.candidate) use --candidate
+      // スタンプの縦線（幅 2）と上端の丸。候補（呼び出し側が s.candidate を付ける）は --cand、人は --warn
+      // Stamp lines (2px wide) with a dot on top. Candidates (the caller sets s.candidate) use --cand, people --warn
       for (const s of stamps) {
         ctx.fillStyle = s.candidate ? colors.candidate : colors.stamp;
         const x = (Number(s.offset_sec) / binSec) * step;
-        if (x >= 0 && x <= cssWidth) ctx.fillRect(Math.min(x, cssWidth - 2), 0, 2, baseY);
+        if (x < 0 || x > cssWidth) continue;
+        const lineX = Math.min(x, cssWidth - 2);
+        ctx.fillRect(lineX, 0, 2, baseY);
+        ctx.beginPath();
+        ctx.arc(lineX + 1, DOT_R, DOT_R, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // 横軸と目盛り / Axis and labels
@@ -143,7 +159,7 @@ const YTSGraph = (function () {
       }
       // 最大件数 / Maximum count
       ctx.textAlign = 'left';
-      ctx.fillText('max ' + max.toLocaleString(), 4, 2);
+      ctx.fillText('最大 ' + max.toLocaleString(), 4, 2);
     }
 
     // 画面の x 座標 → ビン番号（範囲外は null）/ Client x -> bin index (null outside)

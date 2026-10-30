@@ -5,7 +5,7 @@
 // Detached comment list /s/<stream_id>/comments. Follows the parent's seek / settings via BroadcastChannel.
 // Works on its own when the parent is closed (it loads the list and runs the search itself).
 (function () {
-  const { api, errorText, el, setStatus, requireSession } = YTSApi;
+  const { api, errorText, formatDate, el, setStatus, requireSession } = YTSApi;
   const $ = function (id) { return document.getElementById(id); };
   const FLASH_MS = 3000;
   const SEARCH_DELAY_MS = 120;
@@ -49,19 +49,19 @@
       const c = comments[i];
       const display = String(c[2] || c[1] || '');
       const text = String(c[3] || '');
-      const time = el('span', { class: 'row-time', text: tc(times[i]) });
+      const time = el('span', { class: 't', text: tc(times[i]) });
       items[i] = el('li', null, [
         time,
-        el('span', { class: 'row-name', title: String(c[1] || ''), text: display }),
-        el('span', { class: 'row-text', text: text })
+        el('span', { class: 'u', title: String(c[1] || ''), text: display }),
+        el('span', { text: text })
       ]);
       timeNodes[i] = time;
       haystacks[i] = (display + '\n' + text).toLowerCase();
       fragment.append(items[i]);
     }
     $('comment-list').replaceChildren(fragment);
-    if (!chat) $('comment-list').append(el('li', { class: 'empty', text: '未取込 / Not imported yet' }));
-    else if (!comments.length) $('comment-list').append(el('li', { class: 'empty', text: 'コメントはありません / No comments' }));
+    if (!chat) $('comment-list').append(el('li', { class: 'empty', text: '未取り込み' }));
+    else if (!comments.length) $('comment-list').append(el('li', { class: 'empty', text: 'コメントはありません' }));
     applySearch();
   }
 
@@ -75,8 +75,8 @@
       if (hit) shown++;
     }
     $('filter-count').textContent = needle
-      ? shown.toLocaleString() + ' / ' + items.length.toLocaleString() + ' 件 / comments'
-      : items.length.toLocaleString() + ' 件 / comments';
+      ? shown.toLocaleString() + ' / ' + items.length.toLocaleString() + ' 件'
+      : items.length.toLocaleString() + ' 件';
   }
 
   function clearFlash() {
@@ -111,7 +111,7 @@
       for (let i = 0; i < timeNodes.length; i++) timeNodes[i].textContent = tc(times[i]);
       $('page-error').textContent = '';
     } catch (e) {
-      $('page-error').textContent = '設定を読み直せませんでした / Could not reload settings: ' + errorText(e);
+      $('page-error').textContent = '設定を読み直せませんでした: ' + errorText(e);
     }
   }
 
@@ -131,9 +131,10 @@
     $('back-link').href = '/s/' + encodeURIComponent(streamId);
     await requireSession();
     stream = (await api(base)).stream;
-    const title = stream.title || '（タイトルなし） / (untitled)';
-    $('popout-title').textContent = title;
-    document.title = 'コメント / Comments — ' + title;
+    const title = stream.title || '（タイトルなし）';
+    // パンくず: タイトル · 日付（formatDate の日付部分）/ Breadcrumb: title · date (the date part of formatDate)
+    $('popout-title').textContent = title + ' · ' + formatDate(stream.started_at).split(' ')[0];
+    document.title = 'コメント — ' + title;
     render(await loadChat());
     $('boot-status').hidden = true;
     $('search').addEventListener('input', function () {

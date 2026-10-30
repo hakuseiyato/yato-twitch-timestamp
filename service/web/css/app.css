@@ -52,15 +52,8 @@
   --radius-lg: 8px;
   --ease: 120ms ease;
 
-  /* 旧名のエイリアス（graph.js が読む。Task 3 で削除）/ Legacy aliases read by graph.js (removed in task 3) */
-  --graph-bar: var(--bar-top);
-  --graph-bar-hover: var(--bar-hover);
-  --warning: var(--warn);
-  --candidate: var(--cand);
-  --border: var(--rule);
-  --secondary: var(--ink-2);
-  /* 旧ページ用のエイリアス（Task 3 / 8 で削除）。var() なので明るい地でも自動で追従する
-     Legacy aliases for the old page CSS (removed in tasks 3 and 8); var() makes them follow the light theme too */
+  /* 旧ページ用のエイリアス（Task 8 で削除）。var() なので明るい地でも自動で追従する
+     Legacy aliases for the old page CSS (removed in task 8); var() makes them follow the light theme too */
   --bg: var(--paper);
   --surface: var(--paper-2);
   --surface-raised: var(--paper-3);
@@ -116,13 +109,6 @@
     --shadow-inset: inset 0 1px 0 #0000000d;
     --shine: inset 0 1px 0 #ffffff33;
     --on-brand: #ffffff;
-    /* 旧名のエイリアス（graph.js が読む。Task 3 で削除）/ Legacy aliases read by graph.js (removed in task 3) */
-    --graph-bar: var(--bar-top);
-    --graph-bar-hover: var(--bar-hover);
-    --warning: var(--warn);
-    --candidate: var(--cand);
-    --border: var(--rule);
-    --secondary: var(--ink-2);
   }
 }
 
@@ -196,6 +182,10 @@ button:hover:not(:disabled), .btn:hover { background: var(--paper-4); text-decor
    Danger hover stays on --paper-3 to keep 4.5:1 (--paper-4 falls short in the light theme); must follow .btn.ghost:hover */
 .btn.danger:hover, .danger:hover:not(:disabled) { background: var(--paper-3); color: var(--err); }
 .danger:hover:not(:disabled) { border-color: var(--err); }
+/* 文字だけのボタン（リンクの見た目。配信ページのメタ行の「再取り込み」「別ウィンドウ」）
+   Text-only button that looks like a link (re-import and pop-out in the stream page's meta line) */
+.link-btn { display: inline; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--accent); font-size: inherit; font-weight: inherit; line-height: inherit; }
+.link-btn:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 3px; }
 button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
 button[aria-busy="true"] { cursor: progress; }
 
@@ -265,6 +255,9 @@ main.doc.pop { max-width: 560px; }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-2); font-size: 13px; }
 .crumb a { color: var(--ink-2); }
 .crumb a:hover { color: var(--ink); text-decoration: none; }
+/* 別ウィンドウはパンくずが見出し（配信のタイトル · 日付）/ In the pop-out the breadcrumb is the heading (stream title · date) */
+.crumb h1 { min-width: 0; margin: 0; color: var(--ink); font-size: inherit; font-weight: 500; letter-spacing: 0; line-height: inherit; overflow-wrap: anywhere; }
+.crumb .push { margin-left: auto; }
 .lead { margin-top: 6px; color: var(--ink-2); }
 .sec { margin-top: 36px; }
 /* 節の見出し: 13px / 600、下に罫線、右端に補助操作 / Section heading: 13px / 600 with a rule below and side actions at the right */
@@ -340,9 +333,14 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.actions { width: 1%; white-space: nowrap; text-align: right; }
 
 /* ---- 配信一覧（表。タイトルのリンクを行全体に広げる）/ Stream list (table; the title link is stretched over the whole row) ---- */
-/* チャンネルの選択: 枠なしのインライン値 / Channel picker: borderless inline value */
-select.inline { min-height: 0; padding: 0 2px; border: 0; border-bottom: 1px dashed var(--ink-3); border-radius: 0; background: none; box-shadow: none; cursor: pointer; }
-select.inline:hover { border-bottom-color: var(--ink); }
+/* 枠なしのインライン値（配信一覧のチャンネル、配信ページのビン・ずれ・遅れ）。本物の <select> / <input> に付ける
+   Borderless inline values (channel on the stream list; bin, offset and lag on the stream page), applied to the real <select> / <input> */
+select.inline, input.inline { min-height: 0; padding: 0 2px; border: 0; border-bottom: 1px dashed var(--ink-3); border-radius: 0; background: none; box-shadow: none; }
+select.inline { cursor: pointer; }
+select.inline:hover, input.inline:hover, input.inline:focus { border-bottom-color: var(--ink); }
+input.inline { width: 6ch; text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
+input.inline::-webkit-inner-spin-button, input.inline::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; appearance: none; }
+input.inline.invalid { border-bottom: 1px solid var(--err); }
 .meta .push { margin-left: auto; }
 .streams .vod-form { margin-top: 14px; }
 .streams .status:not(:empty) { margin-top: 12px; }
@@ -415,11 +413,18 @@ select.inline:hover { border-bottom-color: var(--ink); }
 .selrow { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 10px; color: var(--ink-2); font-size: 13.5px; }
 .selrow .btn { margin-left: auto; }
 #page-error:empty { min-height: 0; }
+.selrow b { color: var(--ink); font-weight: 500; }
+/* メタ行の下に開く VOD の選択・進み具合・状態 / VOD picker, progress and status lines that open below the meta line */
+#stream-view .import-panel, #import-progress { margin-top: 14px; }
+#stream-view > .status:not(:empty), #stream-view > .field-error:not(:empty), #settings-status:not(:empty) { margin-top: 10px; }
 .selection-row { align-items: center; }
 #selection-label { font-variant-numeric: tabular-nums; }
 
-/* コメント | スタンプ: 1100px 以上で 3:2 の横並び、未満は 1 列（タブ）/ Comments | stamps: 3:2 at 1100px and up, one column (tabs) below */
+/* コメント | スタンプ: 1100px 以上で 3:2 の横並び、未満は 1 列（タブ）。幅の切り替えは stream.js の syncLayout がパネルの hidden で行う
+   Comments | stamps: 3:2 at 1100px and up, one column (tabs) below. stream.js syncLayout switches the panels' hidden attribute */
 .lists { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; margin-top: 28px; }
+/* 狭い幅で隠れているパネルの列は、見出しと枠ごと畳む / In narrow mode, the column of a hidden panel folds away with its heading and box */
+.lists > div:has(> .listbox > [role="tabpanel"][hidden]) { display: none; }
 @media (min-width: 1100px) {
   .lists { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 }
@@ -440,9 +445,20 @@ select.inline:hover { border-bottom-color: var(--ink); }
 }
 .tabs [role="tab"]:hover:not(:disabled) { background: transparent; color: var(--ink); }
 .tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--ink); color: var(--ink); }
+/* 配信ページ: タブは狭い幅だけ。広い幅では両方の列が見える / Stream page: tabs only in narrow mode; both columns show when wide */
+.tabs { margin-top: 28px; }
+.tabs + .lists { margin-top: 16px; }
+@media (min-width: 1100px) {
+  .tabs { display: none; }
+  .tabs + .lists { margin-top: 28px; }
+}
 
 /* ---- コメント・スタンプの行 / Comment and stamp rows ---- */
 .list-scroll { position: relative; max-height: 60vh; overflow-y: auto; }
+/* 面の中ではスクロールするのはパネル（stream.js / comments.js が scrollTop を動かす）で、ul.rows は伸びるだけ
+   Inside a box the panel scrolls (stream.js / comments.js set its scrollTop); ul.rows only grows */
+.listbox > .list-scroll { max-height: 440px; }
+.list-scroll > ul.rows { max-height: none; overflow: visible; }
 ul.rows, .row-list { margin: 0; padding: 0; list-style: none; }
 ul.rows { max-height: 440px; overflow: auto; }
 ul.rows li {
@@ -464,7 +480,11 @@ ul.rows.st li { grid-template-columns: 68px minmax(0, 1fr); }
    Candidates get a 3px violet stripe, people a 3px amber one; hi comes later so it wins */
 ul.rows li.cand { box-shadow: inset 3px 0 0 var(--cand); }
 ul.rows li.human { box-shadow: inset 3px 0 0 var(--warn); }
-ul.rows li.hi { background: var(--sel); }
+ul.rows li { overflow-wrap: anywhere; }
+ul.rows li.empty { display: block; }
+/* 選択範囲（in-bin）と別ウィンドウの点滅（flash）。JS が付けるクラス名は契約 / Selection (in-bin) and the pop-out flash; the JS class names are a contract */
+ul.rows li.hi, ul.rows li.in-bin { background: var(--sel); }
+ul.rows li.flash { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
 ul.rows .by { color: var(--ink-3); }
 ul.rows .x { float: right; padding: 0 4px; color: var(--ink-3); cursor: pointer; }
 ul.rows .x:hover { color: var(--err); }
@@ -495,6 +515,14 @@ ul.rows .x:hover { color: var(--err); }
 /* 「候補を先に」の切り替え / "Candidates first" toggle */
 .sort-toggle { display: flex; align-items: center; gap: var(--space-sm); min-height: var(--control-h); padding: 0 14px; color: var(--ink-2); font-size: 13px; cursor: pointer; }
 
+/* ---- 切り離したコメント一覧: 一覧が窓の高さいっぱいに伸びる / Detached comment list: the list fills the window height ---- */
+main.doc.pop { display: flex; flex-direction: column; gap: 0; height: 100vh; padding-top: 20px; padding-bottom: 20px; }
+.pop .sec-h { margin-top: 14px; }
+.pop .sec-h .in { width: 200px; }
+.pop .listbox { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; }
+.pop .listbox > .list-scroll { flex: 1 1 0; max-height: none; }
+.pop .status:not(:empty), .pop .field-error:not(:empty) { margin-top: 10px; }
+.pop .field-error:empty { min-height: 0; }
 /* ---- 切り離したコメント一覧（旧）/ Detached comment list (old) ---- */
 main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var(--space-sm); }
 .popout-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); }
@@ -510,7 +538,8 @@ main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var
   .graph, .graph-wrap { height: 140px; }
   .row-list li, ul.rows li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 var(--space-sm); }
   ul.rows.st li { grid-template-columns: 64px minmax(0, 1fr); }
-  .row-text { grid-column: 1 / -1; }
+  .row-text, ul.rows:not(.st) li > :nth-child(3) { grid-column: 1 / -1; }
+  .pop .sec-h .in { width: 140px; }
   .stream-head { display: none; }
   /* 2 行に畳む: タイトル / 日時・数 / Fold into two lines: title / date and counts */
   .stream-grid { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md); }
@@ -529,8 +558,8 @@ main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var
 @media (pointer: coarse) {
   :root { --control-h: 44px; }
   /* 見た目を変えずに当たり判定だけ 44px に広げる / Widen only the hit area to 44px, keeping the look */
-  .who button, ul.rows .x { position: relative; }
-  .who button::after, ul.rows .x::after {
+  .who button, ul.rows .x, .link-btn { position: relative; }
+  .who button::after, ul.rows .x::after, .link-btn::after {
     content: "";
     position: absolute;
     top: 50%;

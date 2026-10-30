@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>コメント / Comments — Peakaboo</title>
+<title>コメント — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -13,22 +13,22 @@
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-<main class="popout">
-  <div class="popout-bar">
-    <h1 id="popout-title">コメント / Comments</h1>
-    <a id="back-link" href="/">親ページへ / Back to stream</a>
+<main class="doc pop">
+  <!-- 配信のタイトルと日付、親ページへの戻り / Stream title and date, back to the stream page -->
+  <div class="crumb">
+    <h1 id="popout-title">コメント</h1>
+    <a class="push" id="back-link" href="/">配信ページへ</a>
   </div>
-  <div class="form-row">
-    <div class="field">
-      <label for="search">検索（本文・名前）/ Search (text, name)</label>
-      <input id="search" type="search" autocomplete="off" aria-describedby="filter-count">
-    </div>
-  </div>
-  <p class="status" id="filter-count" role="status"></p>
-  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+  <p class="status" id="boot-status" role="status">読み込み中…</p>
   <p class="field-error" id="page-error" role="alert"></p>
-  <div class="list-scroll" id="comment-scroll">
-    <ul class="row-list comment-list" id="comment-list"></ul>
+  <div class="sec-h">
+    <h2>コメント</h2><span class="cnt" id="filter-count" role="status"></span>
+    <span class="r"><input class="in" id="search" type="search" autocomplete="off" placeholder="コメントを検索" aria-label="コメントを検索" aria-describedby="filter-count"></span>
+  </div>
+  <div class="listbox">
+    <div class="list-scroll" id="comment-scroll">
+      <ul class="rows" id="comment-list"></ul>
+    </div>
   </div>
 </main>
 

@@ -8,7 +8,10 @@
   const BIN_KEY = 'yts_bin_sec';
   const BIN_CHOICES = [15, 30, 60, 120];
   const OFFSET_LIMIT_SEC = 3600;
-  const SETTING_LABELS = { vod_offset_sec: 'VOD のずれ / VOD offset', chat_lag_sec: '反応の遅れ / Chat lag' };
+  const SETTING_LABELS = { vod_offset_sec: 'VOD のずれ', chat_lag_sec: '反応の遅れ' };
+  // この幅以上はコメントとスタンプを横並び（app.css の .lists / .tabs と同じ値）
+  // At this width and up, comments and stamps sit side by side (same value as .lists / .tabs in app.css)
+  const wideQuery = window.matchMedia('(min-width: 1100px)');
 
   const match = /^\/s\/([^/]+)(?:\/comments)?\/?$/.exec(location.pathname);
   const streamId = match ? decodeURIComponent(match[1]) : '';
@@ -35,9 +38,9 @@
 
   function showError(text) { $('page-error').textContent = text || ''; }
 
-  // 例外 → 1 行の文言。Twitch 側の Error は日英の message を持つ / Thrown value -> one line. Twitch-side Errors carry a bilingual message
+  // 例外 → 1 行の文言。Twitch 側の Error は日本語の message を持つ / Thrown value -> one line. Twitch-side Errors carry a Japanese message
   function messageOf(e) {
-    if (e instanceof TypeError) return 'Twitch に接続できません / Could not reach Twitch (' + e.message + ')';
+    if (e instanceof TypeError) return 'Twitch に接続できません (' + e.message + ')';
     if (e instanceof Error) return e.message;
     return errorText(e);
   }
@@ -60,35 +63,54 @@
 
   // ---- 見出し / Heading ----
 
+  // 配信の長さ: チャットの length_sec、無ければ最後のスタンプ。どちらも無ければ null
+  // Stream length: the chat's length_sec, else the last stamp; null when neither is known
+  function streamLengthSec() {
+    if (chat && Number(chat.length_sec) > 0) return Number(chat.length_sec);
+    if (!stamps.length) return null;
+    return stamps.reduce(function (m, s) { return Math.max(m, Number(s.offset_sec) || 0); }, 0);
+  }
+
+  // パンくず・h1・メタ行（開始と長さ / VOD / チャットの状態 / スタンプ数と候補数）
+  // Breadcrumb, h1 and the meta line (start and length / VOD / chat state / stamp and candidate counts)
   function renderHead() {
-    const title = stream.title || '（タイトルなし） / (untitled)';
+    const title = stream.title || '（タイトルなし）';
     $('stream-title').textContent = title;
     document.title = title + ' — Peakaboo';
-    const meta = [stream.channel, formatDate(stream.started_at)];
-    $('stream-meta').replaceChildren(meta.join(' · '));
+    // formatDate は 'YYYY-MM-DD HH:MM'（不明は '—'）/ formatDate gives 'YYYY-MM-DD HH:MM' ('—' when unknown)
+    const started = formatDate(stream.started_at).split(' ');
+    const sep = function () { return el('span', { class: 'faint', 'aria-hidden': 'true', text: '›' }); };
+    $('stream-crumb').replaceChildren(
+      el('a', { href: '/', text: '配信' }), sep(),
+      el('span', { text: stream.channel || '' }), sep(),
+      el('span', { text: started[0] })
+    );
+    const length = streamLengthSec();
+    $('stream-meta').replaceChildren('開始 ', el('b', { class: 'num', text: started[1] || started[0] }));
+    if (length !== null) $('stream-meta').append(' · 長さ ', el('b', { class: 'num', text: TSLib.formatTimecode(length) }));
+    $('vod-meta').hidden = !stream.vod_id;
     if (stream.vod_id) {
-      $('stream-meta').append(' · ', el('a', {
-        href: 'https://www.twitch.tv/videos/' + encodeURIComponent(stream.vod_id),
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        text: 'VOD ' + stream.vod_id
-      }));
+      $('vod-link').href = 'https://www.twitch.tv/videos/' + encodeURIComponent(stream.vod_id);
+      $('vod-link').textContent = String(stream.vod_id);
     }
     const state = $('chat-state-text');
     const button = $('import-button');
     if (chat) {
-      const count = comments.length.toLocaleString();
-      state.className = 'chat-done';
-      state.textContent = '取込済み / Imported: ' + count + ' 件 / comments（' + formatDate(stream.chat_fetched_at) +
-        (stream.chat_fetched_by ? ', ' + stream.chat_fetched_by : '') + '）';
-      button.textContent = 'チャットを取り込み直す / Re-import chat';
-      button.className = 'secondary';
+      state.replaceChildren(
+        el('span', { class: 'ok', text: '取り込み済み' }), ' · ',
+        el('b', { class: 'num', text: comments.length.toLocaleString() + ' 件' })
+      );
+      button.textContent = '再取り込み';
+      // 取り込んだ日時と人（薄く）/ When and by whom it was imported (faint)
+      $('chat-fetched').textContent = '（' + formatDate(stream.chat_fetched_at) + (stream.chat_fetched_by ? ' · ' + stream.chat_fetched_by : '') + '）';
     } else {
-      state.className = 'chat-none';
-      state.textContent = '未取込 / Not imported yet';
-      button.textContent = 'チャットを取り込む / Import chat';
-      button.className = 'primary';
+      state.replaceChildren(el('span', { class: 'warn', text: '未取り込み' }));
+      button.textContent = '取り込む';
+      $('chat-fetched').textContent = '';
     }
+    const candidates = stamps.filter(function (s) { return TSLib.isCandidate(s.memo); }).length;
+    $('stamp-meta').replaceChildren('スタンプ ', el('b', { class: 'num', text: stamps.length.toLocaleString() }));
+    if (candidates > 0) $('stamp-meta').append(' ', el('span', { class: 'faint', text: '候補 ' + candidates.toLocaleString() }));
   }
 
   // ---- コメント一覧（1 度だけ組み、強調とスクロールでは組み直さない）/ Comment list (built once; highlight and scroll never rebuild it) ----
@@ -104,11 +126,11 @@
     timeNodes = new Array(comments.length);
     for (let i = 0; i < comments.length; i++) {
       const c = comments[i];
-      const time = el('span', { class: 'row-time', text: tc(times[i]) });
+      const time = el('span', { class: 't', text: tc(times[i]) });
       const item = el('li', null, [
         time,
-        el('span', { class: 'row-name', title: String(c[1] || ''), text: String(c[2] || c[1] || '') }),
-        el('span', { class: 'row-text', text: String(c[3] || '') })
+        el('span', { class: 'u', title: String(c[1] || ''), text: String(c[2] || c[1] || '') }),
+        el('span', { text: String(c[3] || '') })
       ]);
       timeNodes[i] = time;
       commentItems[i] = item;
@@ -116,12 +138,10 @@
     }
     $('comment-list').replaceChildren(fragment);
     highlighted.comments = [0, 0];
-    $('comment-count').textContent = '(' + comments.length.toLocaleString() + ')';
+    $('comment-count').textContent = comments.length.toLocaleString();
     const empty = $('comment-empty');
     empty.hidden = comments.length > 0;
-    empty.textContent = chat
-      ? 'コメントはありません / No comments'
-      : '未取込 / Not imported yet — 「チャットを取り込む / Import chat」で取り込めます / Use "Import chat" above';
+    empty.textContent = chat ? 'コメントはありません' : '未取り込み。上の「取り込む」で取り込めます';
   }
 
   // 時刻補正が変わったら時刻の文字だけ書き換える（順序は一定のずらしでは変わらない）
@@ -139,20 +159,30 @@
     stamps.sort(function (a, b) { return a.offset_sec - b.offset_sec || (a.id < b.id ? -1 : 1); });
     stampItems = stamps.map(function (s) {
       const candidate = TSLib.isCandidate(s.memo);
-      let text;
+      let body;
       if (candidate) {
-        // 候補はバッジ + 印を外した本文 / Candidates: badge + memo without the prefix
-        text = el('span', { class: 'row-text' }, [
-          el('span', { class: 'badge-candidate', title: '候補 / Candidate', 'aria-label': '候補 / Candidate', text: '候補' }),
-          s.memo.replace(TSLib.CANDIDATE_PATTERN, '')
+        // 候補: チップ + 理由（' | ' の前）+ 発言（' | ' の後ろ、薄く）/ Candidate: chip + reason (before ' | ') + utterance (after ' | ', faint)
+        const text = s.memo.replace(TSLib.CANDIDATE_PATTERN, '');
+        const cut = text.indexOf(' | ');
+        const reason = cut < 0 ? text : text.slice(0, cut);
+        const said = cut < 0 ? '' : text.slice(cut + 3);
+        body = el('span', { class: 'body' }, [
+          el('span', { class: 'chip', text: '候補' }),
+          reason,
+          said ? ' ' : null,
+          said ? el('span', { class: 'by', text: said }) : null
         ]);
       } else {
-        text = s.memo ? el('span', { class: 'row-text', text: s.memo }) : el('span', { class: 'row-text muted', text: '（メモなし / no memo）' });
+        // 人: メモ（無ければ「メモなし」）+ 付けた人（薄く）/ Person: memo ("メモなし" when empty) + who marked it (faint)
+        body = el('span', { class: 'body' }, [
+          s.memo ? s.memo : el('span', { class: 'faint', text: 'メモなし' }),
+          ' ',
+          el('span', { class: 'by', text: s.by })
+        ]);
       }
-      return el('li', { class: candidate ? 'candidate' : null }, [
-        el('span', { class: 'row-time', text: tc(s.offset_sec) }),
-        el('span', { class: 'row-name', text: s.by }),
-        text
+      return el('li', { class: candidate ? 'cand candidate' : 'human' }, [
+        el('span', { class: 't', text: tc(s.offset_sec) }),
+        body
       ]);
     });
     let shown = stampItems;
@@ -163,8 +193,10 @@
     }
     $('stamp-list').replaceChildren.apply($('stamp-list'), shown);
     highlighted.stamps = [0, 0];
-    $('stamp-count').textContent = '(' + stamps.length.toLocaleString() + ')';
+    $('stamp-count').textContent = stamps.length.toLocaleString();
     $('stamp-empty').hidden = stamps.length > 0;
+    // メタ行のスタンプ数・候補数・長さも追従させる / Keeps the meta line's stamp and candidate counts and length in step
+    renderHead();
   }
 
   // ---- グラフ / Graph ----
@@ -202,14 +234,16 @@
     return [lo, hi];
   }
 
-  // 見えている一覧を、選択範囲の先頭（無ければ直後の行）までスクロール
-  // Scrolls the visible list to the first row of the selection (or the next row when the bin is empty)
+  // 見えている一覧（横並びなら両方）を、選択範囲の先頭（無ければ直後の行）までスクロール
+  // Scrolls the visible list(s) (both when side by side) to the first row of the selection (or the next row when the bin is empty)
   function scrollToSelection() {
     if (selectedBin === null) return;
-    const showingStamps = !$('panel-stamps').hidden;
-    const panel = showingStamps ? $('panel-stamps') : $('panel-comments');
-    const items = showingStamps ? stampItems : commentItems;
-    const range = showingStamps ? highlighted.stamps : highlighted.comments;
+    scrollPanel($('panel-comments'), commentItems, highlighted.comments);
+    scrollPanel($('panel-stamps'), stampItems, highlighted.stamps);
+  }
+
+  function scrollPanel(panel, items, range) {
+    if (panel.hidden) return;
     const target = items[Math.min(range[0], items.length - 1)];
     if (target) panel.scrollTop = target.offsetTop;
   }
@@ -223,8 +257,8 @@
     const range = stampRange(start, end);
     moveClass(stampItems, highlighted.stamps, range, 'in-bin');
     highlighted.stamps = range;
-    $('selection-label').textContent = '選択 / Selected: ' + tc(start) + ' – ' + tc(end) +
-      '（' + (commentRange[1] - commentRange[0]).toLocaleString() + ' 件 / comments）';
+    $('selection-label').replaceChildren('選択 ', el('b', { class: 'num', text: tc(start) + ' – ' + tc(end) }),
+      ' · コメント ' + (commentRange[1] - commentRange[0]).toLocaleString() + ' 件');
     $('mark-button').disabled = false;
     if (scroll) scrollToSelection();
   }
@@ -258,6 +292,18 @@
     scrollToSelection();
   }
 
+  // 広い幅では両パネルの hidden を外し（タブは CSS で隠れる）、狭い幅では選んでいるタブの 1 枚に戻す
+  // Wide: clears hidden on both panels (the tabs are hidden by CSS); narrow: back to the selected tab's single panel
+  function syncLayout() {
+    if (wideQuery.matches) {
+      $('panel-comments').hidden = false;
+      $('panel-stamps').hidden = false;
+      scrollToSelection();
+    } else {
+      showTab($('tab-stamps').getAttribute('aria-selected') === 'true' ? 'stamps' : 'comments');
+    }
+  }
+
   function tabKeys(event) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
@@ -279,7 +325,7 @@
     if (input.value.trim() === '' || !Number.isFinite(value) || Math.abs(value) > OFFSET_LIMIT_SEC) {
       input.classList.add('invalid');
       input.value = String(stream[key]);
-      setStatus(status, '−3600〜3600 の秒数を入れてください / Enter seconds between −3600 and 3600 (bad_request)', 'error');
+      setStatus(status, '−3600〜3600 の秒数を入れてください (bad_request)', 'error');
       return;
     }
     input.classList.remove('invalid');
@@ -288,13 +334,13 @@
       const body = {};
       body[key] = value;
       stream = (await api(base, { method: 'PATCH', body: body })).stream;
-      setStatus(status, '保存しました / Saved: ' + SETTING_LABELS[key] + ' = ' + stream[key] + ' s', 'ok');
+      setStatus(status, '保存しました: ' + SETTING_LABELS[key] + ' = ' + stream[key] + ' s', 'ok');
       post({ type: 'settings' });
       retime();
       redraw();
     } catch (e) {
       input.value = String(stream[key]);
-      setStatus(status, '保存できませんでした / Not saved: ' + errorText(e) + '（現在 / now ' + stream[key] + ' s）', 'error');
+      setStatus(status, '保存できませんでした: ' + errorText(e) + '（現在 ' + stream[key] + ' s）', 'error');
     }
   }
 
@@ -327,13 +373,13 @@
           stamps.push(record);
           renderStamps();
           redraw();
-          setStatus($('page-status'), '印を付けました / Marked ' + record.timecode, 'ok');
+          setStatus($('page-status'), '印を付けました: ' + record.timecode, 'ok');
         } else {
           const reason = ((result.rejected || [])[0] || {}).reason || 'unknown';
-          showError('印を付けられませんでした / Could not mark (' + reason + ')');
+          showError('印を付けられませんでした (' + reason + ')');
         }
       } catch (e) {
-        showError('印を付けられませんでした / Could not mark: ' + errorText(e));
+        showError('印を付けられませんでした: ' + errorText(e));
       }
     });
   }
@@ -372,7 +418,7 @@
     $('vod-picker').hidden = false;
     $('import-button').disabled = true;
     select.disabled = true;
-    select.replaceChildren(el('option', { value: '', text: '候補を読み込み中… / Loading candidates…' }));
+    select.replaceChildren(el('option', { value: '', text: '候補を読み込み中…' }));
     try {
       vodCandidates = await YTSChat.listVods(stream.channel);
     } catch (e) {
@@ -386,7 +432,7 @@
     const picked = current ? (currentKnown ? { id: current } : null) : YTSChat.pickVod(vodCandidates, stream.started_at);
     $('vod-url').value = current && !currentKnown ? current : '';
     select.replaceChildren(
-      el('option', { value: '', text: vodCandidates.length ? '選んでください / Choose one' : '候補がありません / No candidates' }),
+      el('option', { value: '', text: vodCandidates.length ? '選んでください' : '候補がありません' }),
       ...vodCandidates.map(function (v) {
         return el('option', {
           value: String(v.id),
@@ -410,13 +456,13 @@
       if (!vodId) {
         urlInput.classList.add('invalid');
         urlInput.focus();
-        showError('VOD の URL（twitch.tv/videos/…）か数字の ID を入れてください / Enter a VOD URL (twitch.tv/videos/…) or numeric ID');
+        showError('VOD の URL（twitch.tv/videos/…）か数字の ID を入れてください');
         return;
       }
     } else {
       vodId = $('vod-select').value;
       if (!vodId) {
-        showError('VOD を選ぶか URL を入れてください / Choose a VOD or enter a URL');
+        showError('VOD を選ぶか URL を入れてください');
         return;
       }
     }
@@ -436,16 +482,16 @@
     setStatus($('page-status'), '');
     try {
       if (vod && !(Number(vod.lengthSeconds) > 0)) {
-        throw new Error('VOD の長さが 0 秒です（処理中か削除済み）/ The VOD length is 0 s (still processing or deleted)');
+        throw new Error('VOD の長さが 0 秒です（処理中か削除済み）');
       }
-      progress('0 件 / 0 comments');
+      progress('0 件');
       const rows = await YTSChat.fetchVodChat(vodId, function (n) {
-        progress(n.toLocaleString() + ' 件 / ' + n.toLocaleString() + ' comments');
+        progress(n.toLocaleString() + ' 件');
       }, { signal: controller.signal });
       const length = vod
         ? Number(vod.lengthSeconds)
         : Math.ceil(rows.reduce(function (m, r) { return Math.max(m, Number(r[0]) || 0); }, 0));
-      progress('保存中… / Saving… (' + rows.length.toLocaleString() + ' 件 / comments)');
+      progress('保存中…（' + rows.length.toLocaleString() + ' 件）');
       const query = new URLSearchParams({ vod_id: vodId, count: String(rows.length), length_sec: String(length) });
       await api(base + '/chat?' + query.toString(), { method: 'PUT', rawBody: YTSChat.buildChatJson(vodId, length, rows) });
       stream = (await api(base)).stream;
@@ -453,10 +499,10 @@
       fillSettings();
       renderHead();
       redraw();
-      setStatus($('page-status'), '取り込みました / Imported: ' + rows.length.toLocaleString() + ' 件 / comments', 'ok');
+      setStatus($('page-status'), '取り込みました: ' + rows.length.toLocaleString() + ' 件', 'ok');
     } catch (e) {
-      if (isAbort(e)) setStatus($('page-status'), '取り込みを中止しました / Import cancelled');
-      else showError('取り込めませんでした / Import failed: ' + messageOf(e));
+      if (isAbort(e)) setStatus($('page-status'), '取り込みを中止しました');
+      else showError('取り込めませんでした: ' + messageOf(e));
     } finally {
       importAbort = null;
       setImporting(false);
@@ -473,7 +519,7 @@
 
   function popOut() {
     const win = window.open('/s/' + encodeURIComponent(streamId) + '/comments', 'yts-comments-' + streamId);
-    if (!win) showError('別ウィンドウを開けませんでした（ポップアップのブロック）/ Could not open the window (pop-up blocked)');
+    if (!win) showError('別ウィンドウを開けませんでした（ポップアップのブロック）');
   }
 
   // ---- 起動 / Boot ----
@@ -516,6 +562,8 @@
     $('vod-cancel').addEventListener('click', function () { showError(''); closePicker(); });
     $('import-cancel').addEventListener('click', function () { if (importAbort) importAbort.abort(); });
     $('popout-button').addEventListener('click', popOut);
+    syncLayout();
+    wideQuery.addEventListener('change', syncLayout);
   }
 
   // 起動の失敗は画面に出す（例外を外に漏らさない）/ Boot failures go on screen (nothing escapes as an unhandled rejection)

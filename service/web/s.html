@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>配信 / Stream — Peakaboo</title>
+<title>配信 — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -13,102 +13,106 @@
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-<header class="site-header" id="site-header" hidden></header>
+<header class="hdr" id="site-header" hidden></header>
 
 <main class="wide">
-  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+  <p class="status" id="boot-status" role="status">読み込み中…</p>
 
-  <div class="stack" id="stream-view" hidden>
-    <!-- 配信の見出しとチャットの状態 / Stream heading and chat state -->
-    <section class="card" aria-labelledby="stream-title">
-      <div class="card-head">
-        <h1 id="stream-title"></h1>
-        <button type="button" class="secondary push" id="popout-button">別ウィンドウ / Pop out</button>
-      </div>
-      <p class="muted" id="stream-meta"></p>
-      <div class="chat-state">
-        <p id="chat-state-text"></p>
-        <button type="button" class="secondary" id="import-button">チャットを取り込む / Import chat</button>
-      </div>
+  <div id="stream-view" hidden>
+    <!-- パンくず・見出し・メタ行（stream.js の renderHead が埋める）/ Breadcrumb, heading and meta line (filled by renderHead in stream.js) -->
+    <nav class="crumb" id="stream-crumb" aria-label="パンくず"></nav>
+    <h1 id="stream-title"></h1>
+    <div class="meta">
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="stream-meta"></span></span>
+      <span id="vod-meta" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 5v14M3 10h18"/></svg>VOD <a class="num" id="vod-link" target="_blank" rel="noopener noreferrer"></a></span>
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.3A8 8 0 1 1 21 12z"/></svg>チャット <span id="chat-state-text"></span> · <button type="button" class="link-btn" id="import-button">取り込む</button> <span class="faint" id="chat-fetched"></span></span>
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12l-2 7h-8z"/><path d="M8 10v11M16 10v11"/></svg><span id="stamp-meta"></span></span>
+      <span class="push"><button type="button" class="link-btn" id="popout-button">コメントを別ウィンドウで ↗</button></span>
+    </div>
 
-      <!-- VOD の選択（vod_id 未設定のとき）/ VOD choice (when vod_id is not set) -->
-      <form class="import-panel" id="vod-picker" hidden novalidate>
-        <div class="form-row">
-          <div class="field">
-            <label for="vod-select">VOD の候補 / VOD candidates</label>
-            <select id="vod-select"></select>
-          </div>
+    <!-- VOD の選択（取り込み・再取り込みの最初）/ VOD choice (first step of import and re-import) -->
+    <form class="import-panel" id="vod-picker" hidden novalidate>
+      <div class="form-row">
+        <div class="field">
+          <label for="vod-select">VOD の候補</label>
+          <select id="vod-select"></select>
         </div>
-        <div class="form-row">
-          <div class="field">
-            <label for="vod-url">または URL か ID / Or a URL or ID</label>
-            <input id="vod-url" autocomplete="off" placeholder="https://www.twitch.tv/videos/1234567890">
-          </div>
-          <button type="submit" class="primary" id="vod-confirm">この VOD で取り込む / Import this VOD</button>
-          <button type="button" class="secondary" id="vod-cancel">やめる / Cancel</button>
-        </div>
-      </form>
-
-      <!-- 取り込みの進み具合 / Import progress -->
-      <div class="form-row" id="import-progress" hidden>
-        <p class="status" id="import-progress-text" role="status" aria-live="polite"></p>
-        <button type="button" class="secondary" id="import-cancel">中止 / Cancel</button>
-      </div>
-
-      <p class="status" id="page-status" role="status"></p>
-      <p class="field-error" id="page-error" role="alert"></p>
-    </section>
-
-    <!-- 密度グラフと設定 / Density graph and settings -->
-    <section class="card" aria-labelledby="graph-heading">
-      <div class="card-head">
-        <h2 id="graph-heading">コメントの密度 / Comment density</h2>
       </div>
       <div class="form-row">
-        <div class="field narrow">
-          <label for="bin-select">ビン幅 / Bin width</label>
-          <select id="bin-select">
-            <option value="15">15 秒 / 15 s</option>
-            <option value="30">30 秒 / 30 s</option>
-            <option value="60">60 秒 / 60 s</option>
-            <option value="120">120 秒 / 120 s</option>
-          </select>
+        <div class="field">
+          <label for="vod-url">または URL か ID</label>
+          <input id="vod-url" autocomplete="off" placeholder="https://www.twitch.tv/videos/1234567890">
         </div>
-        <div class="field narrow">
-          <label for="vod-offset">VOD のずれ（秒）/ VOD offset (s)</label>
-          <input id="vod-offset" type="number" step="0.1" min="-3600" max="3600" inputmode="decimal" aria-describedby="settings-status">
-        </div>
-        <div class="field narrow">
-          <label for="chat-lag">反応の遅れ（秒）/ Chat lag (s)</label>
-          <input id="chat-lag" type="number" step="0.1" min="-3600" max="3600" inputmode="decimal" aria-describedby="settings-status">
-        </div>
+        <button type="submit" class="btn pri" id="vod-confirm">この VOD で取り込む</button>
+        <button type="button" class="btn ghost" id="vod-cancel">やめる</button>
+      </div>
+    </form>
+
+    <!-- 取り込みの進み具合 / Import progress -->
+    <div class="form-row" id="import-progress" hidden>
+      <p class="status" id="import-progress-text" role="status" aria-live="polite"></p>
+      <button type="button" class="btn" id="import-cancel">中止</button>
+    </div>
+
+    <p class="status" id="page-status" role="status"></p>
+    <p class="field-error" id="page-error" role="alert"></p>
+
+    <!-- 密度グラフと時刻補正 / Density graph and time correction -->
+    <section class="sec" aria-labelledby="graph-heading">
+      <div class="sec-h">
+        <h2 id="graph-heading">コメントの密度</h2>
+        <span class="r">
+          <label>ビン <select class="inline" id="bin-select">
+            <option value="15">15 秒</option>
+            <option value="30">30 秒</option>
+            <option value="60">60 秒</option>
+            <option value="120">120 秒</option>
+          </select></label>
+          <label>VOD のずれ <input class="inline" id="vod-offset" type="number" step="0.1" min="-3600" max="3600" inputmode="decimal" aria-describedby="settings-status"> s</label>
+          <label>反応の遅れ <input class="inline" id="chat-lag" type="number" step="0.1" min="-3600" max="3600" inputmode="decimal" aria-describedby="settings-status"> s</label>
+        </span>
       </div>
       <p class="status" id="settings-status" role="status"></p>
-      <div class="graph-wrap">
-        <canvas id="graph" aria-label="コメント密度グラフ（左右キーで移動）/ Comment density graph (arrow keys to move)"></canvas>
-      </div>
-      <div class="form-row selection-row">
-        <p id="selection-label">未選択 / Nothing selected</p>
-        <button type="button" class="primary push" id="mark-button" disabled>ここに印 / Mark here</button>
+      <div class="gwrap">
+        <div class="graph">
+          <canvas id="graph" aria-label="コメントの密度（← → で移動）"></canvas>
+        </div>
+        <div class="selrow">
+          <span id="selection-label">未選択</span>
+          <span class="faint">← → で移動</span>
+          <button type="button" class="btn pri" id="mark-button" disabled>ここに印</button>
+        </div>
       </div>
     </section>
 
-    <!-- コメントとスタンプ / Comments and stamps -->
-    <section class="card" aria-label="一覧 / Lists">
-      <div class="tabs" role="tablist" aria-label="一覧の切り替え / Switch list">
-        <button type="button" role="tab" id="tab-comments" aria-controls="panel-comments" aria-selected="true">コメント / Comments <span class="muted" id="comment-count"></span></button>
-        <button type="button" role="tab" id="tab-stamps" aria-controls="panel-stamps" aria-selected="false" tabindex="-1">スタンプ / Stamps <span class="muted" id="stamp-count"></span></button>
+    <!-- コメントとスタンプ: 1100px 以上は横並び、未満はタブ（stream.js の syncLayout）/ Comments and stamps: side by side at 1100px and up, tabs below (syncLayout in stream.js) -->
+    <div class="tabs" role="tablist" aria-label="一覧の切り替え">
+      <button type="button" role="tab" id="tab-comments" aria-controls="panel-comments" aria-selected="true">コメント</button>
+      <button type="button" role="tab" id="tab-stamps" aria-controls="panel-stamps" aria-selected="false" tabindex="-1">スタンプ</button>
+    </div>
+    <div class="lists">
+      <div>
+        <div class="sec-h"><h2>コメント</h2><span class="cnt" id="comment-count"></span></div>
+        <div class="listbox">
+          <div class="list-scroll" role="tabpanel" id="panel-comments" aria-labelledby="tab-comments">
+            <ul class="rows" id="comment-list"></ul>
+            <p class="empty" id="comment-empty" hidden></p>
+          </div>
+        </div>
       </div>
-      <div class="list-scroll" role="tabpanel" id="panel-comments" aria-labelledby="tab-comments">
-        <ul class="row-list comment-list" id="comment-list"></ul>
-        <p class="empty" id="comment-empty" hidden></p>
+      <div>
+        <div class="sec-h">
+          <h2>スタンプ</h2><span class="cnt" id="stamp-count"></span>
+          <span class="r"><label class="row"><input type="checkbox" id="stamp-candidates-first">候補を先に</label></span>
+        </div>
+        <div class="listbox">
+          <div class="list-scroll" role="tabpanel" id="panel-stamps" aria-labelledby="tab-stamps" hidden>
+            <ul class="rows st" id="stamp-list"></ul>
+            <p class="empty" id="stamp-empty" hidden>スタンプはまだありません</p>
+          </div>
+        </div>
       </div>
-      <div class="list-scroll" role="tabpanel" id="panel-stamps" aria-labelledby="tab-stamps" hidden>
-        <label class="muted sort-toggle"><input type="checkbox" id="stamp-candidates-first"> 候補を先に / Candidates first</label>
-        <ul class="row-list stamp-list" id="stamp-list"></ul>
-        <p class="empty" id="stamp-empty" hidden>スタンプはまだありません / No stamps yet</p>
-      </div>
-    </section>
+    </div>
   </div>
 </main>
 

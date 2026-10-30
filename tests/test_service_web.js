@@ -30,7 +30,7 @@ const parsed = Chat.parseCommentsPage(page);
 assert.strictEqual(parsed.comments.length, 3);
 assert.strictEqual(parsed.hasNextPage, true);
 assert.strictEqual(parsed.cursor, page[0].data.video.comments.edges[2].cursor);
-assert.throws(() => Chat.parseCommentsPage([{ data: { video: null } }]), /VOD not found/);
+assert.throws(() => Chat.parseCommentsPage([{ data: { video: null } }]), /^Error: VOD が見つかりません$/);
 
 // VOD ID / VOD id
 assert.strictEqual(Chat.parseVodId('https://www.twitch.tv/videos/2913861877?t=1h2m'), '2913861877');
@@ -79,16 +79,22 @@ assert.strictEqual(Graph.labelStep(60, 10), 10);
 assert.strictEqual(Graph.labelStep(120, 100), 1);
 assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 
-// グラフの縦線: candidate が真のスタンプは --candidate、それ以外は --warning（canvas は最小の偽物）
-// Graph stamp lines: stamps with a truthy candidate use --candidate, others --warning (minimal fake canvas)
+// グラフの縦線: candidate が真のスタンプは --cand、それ以外は --warn。棒はグラデーション、線の上端に半径 4 の丸（canvas は最小の偽物）
+// Graph stamp lines: stamps with a truthy candidate use --cand, others --warn. Bars are gradients, each line has a radius-4 dot on top (minimal fake canvas)
 (function () {
-  const css = { '--warning': '#e0b050', '--candidate': '#c792ea' };
+  const css = { '--warn': '#e0b050', '--cand': '#c792ea', '--bar-top': '#6f8fb8', '--bar-bot': '#3b4d66' };
   const calls = [];
-  const ctx = { setTransform() {}, clearRect() {}, fillText() {}, fillStyle: '', globalAlpha: 1,
+  const arcs = [];
+  const gradients = [];
+  const ctx = { setTransform() {}, clearRect() {}, fillText() {}, beginPath() {}, fill() {}, fillStyle: '', globalAlpha: 1,
+    createLinearGradient() { const g = { stops: [], addColorStop(at, color) { g.stops.push([at, color]); } }; gradients.push(g); return g; },
+    arc(x, y, r) { arcs.push({ x: x, y: y, r: r, fill: ctx.fillStyle }); },
     fillRect(x, y, w, h) { calls.push({ x: x, y: y, w: w, fill: ctx.fillStyle }); } };
+  const attrs = {};
   const fakeNode = () => ({ style: {}, setAttribute() {}, removeAttribute() {}, addEventListener() {}, append() {} });
   const wrap = Object.assign(fakeNode(), { clientWidth: 300, getBoundingClientRect: () => ({ left: 0, width: 300, height: 100 }) });
   const canvas = Object.assign(fakeNode(), { parentElement: wrap, getContext: () => ctx,
+    setAttribute(name, value) { attrs[name] = value; },
     getBoundingClientRect: () => ({ left: 0, width: 300, height: 100 }) });
   global.window = { devicePixelRatio: 1, addEventListener() {} };
   global.document = { createElement: fakeNode };
@@ -101,9 +107,18 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
       { offset_sec: 10, memo: '人 / human' },
       { offset_sec: 40, memo: '候補: 山 / peak', candidate: true }
     ] });
-    // 縦線は y = 0・幅 2 で描く / Stamp lines are drawn at y = 0 with width 2
-    const lines = calls.filter(c => c.y === 0 && c.w === 2).map(c => c.fill);
+    // 縦線は y = 0・幅 2 の単色で描く（棒はグラデーションのオブジェクトなので除く）/ Stamp lines are solid, at y = 0 with width 2 (bars are gradient objects, so excluded)
+    const lines = calls.filter(c => c.y === 0 && c.w === 2 && typeof c.fill === 'string').map(c => c.fill);
     assert.deepStrictEqual(lines, ['#e0b050', '#c792ea']);
+    // 棒は上 --bar-top・下 --bar-bot のグラデーション / Bars are --bar-top to --bar-bot gradients
+    assert.ok(calls.some(c => typeof c.fill === 'object' && c.fill.stops.length));
+    assert.deepStrictEqual(gradients[0].stops, [[0, '#6f8fb8'], [1, '#3b4d66']]);
+    // 線ごとに上端の丸（半径 4、線と同じ色）/ One dot per line at the top (radius 4, the line colour)
+    assert.deepStrictEqual(arcs.map(a => [a.r, a.fill]), [[4, '#e0b050'], [4, '#c792ea']]);
+    // 読み上げは日本語だけ / Screen-reader text is Japanese only
+    assert.strictEqual(attrs['aria-valuetext'], '未選択');
+    g.select(1);
+    assert.strictEqual(attrs['aria-valuetext'], '00:00:30 – 00:01:00 · 2 件');
   } finally {
     delete global.window; delete global.document; delete global.getComputedStyle; delete global.TSLib;
   }
@@ -111,11 +126,11 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 
 // 取得の拒否は最終ページ扱いにしない / A rejected fetch is never treated as the last page
 assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'failed integrity check', extensions: { code: 'IntegrityCheckFailed' } }], data: { video: { id: '1', comments: null } } }]),
-  /チャット取得が拒否されました \/ Chat fetch rejected: .*failed integrity check/);
-assert.throws(() => Chat.parseCommentsPage([{ data: { video: { id: '1', comments: null } } }]), /Chat fetch rejected/);
+  /^Error: チャット取得が拒否されました: .*failed integrity check$/);
+assert.throws(() => Chat.parseCommentsPage([{ data: { video: { id: '1', comments: null } } }]), /^Error: チャット取得が拒否されました: comments: null$/);
 assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'IntegrityCheckFailed' }], data: { video: { comments: { edges: [], pageInfo: {} } } } }]),
-  /Chat fetch rejected: IntegrityCheckFailed/);
-assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'x' }], data: { video: null } }]), /VOD not found/);
+  /^Error: チャット取得が拒否されました: IntegrityCheckFailed$/);
+assert.throws(() => Chat.parseCommentsPage([{ errors: [{ message: 'x' }], data: { video: null } }]), /^Error: VOD が見つかりません$/);
 
 // ページ間の重複除去 / De-duplication across pages
 const seenIds = new Set();
@@ -130,7 +145,7 @@ assert.strictEqual(Chat.mergeComments(seenIds, page2).length, 0);
 assert.strictEqual(Chat.nextCursor(parsed), page[0].data.video.comments.edges[2].cursor);
 assert.strictEqual(Chat.nextCursor({ hasNextPage: false, cursor: 'x' }), null);
 const emptyNext = Chat.parseCommentsPage([{ data: { video: { comments: { edges: [], pageInfo: { hasNextPage: true } } } } }]);
-assert.throws(() => Chat.nextCursor(emptyNext), /Next page cursor missing/);
+assert.throws(() => Chat.nextCursor(emptyNext), /^Error: 次ページの位置がありません$/);
 
 // エラー文は日本語だけ、末尾にコードと status / Error text is Japanese only, with the code and status appended
 assert.strictEqual(Api.errorText({ error: 'network', status: 0 }), '通信できませんでした (network)');
@@ -167,9 +182,9 @@ const fakePages = [
   assert.ok(sent.every(s => s.clientId === 'kd1unb4b3q4t58fwlpcbzcbnm76a8fp'));
   // 拒否は例外になる（黙って打ち切らない）/ A rejection throws (no silent truncation)
   global.fetch = async () => ({ ok: true, status: 200, json: async () => [{ errors: [{ message: 'failed integrity check' }], data: { video: { comments: null } } }] });
-  await assert.rejects(Chat.fetchVodChat('1', null, {}), /Chat fetch rejected/);
+  await assert.rejects(Chat.fetchVodChat('1', null, {}), /^Error: チャット取得が拒否されました: failed integrity check$/);
   // hasNextPage が真なのに edges が空 → 例外 / hasNextPage true with empty edges -> throws
   global.fetch = async () => ({ ok: true, status: 200, json: async () => [{ data: { video: { comments: { edges: [], pageInfo: { hasNextPage: true } } } } }] });
-  await assert.rejects(Chat.fetchVodChat('1', null, {}), /Next page cursor missing/);
+  await assert.rejects(Chat.fetchVodChat('1', null, {}), /^Error: 次ページの位置がありません$/);
   console.log('all tests passed');
 }()).catch(function (e) { console.error(e); process.exit(1); });

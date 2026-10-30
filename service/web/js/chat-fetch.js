@@ -42,11 +42,11 @@ const YTSChat = (function () {
   function parseCommentsPage(page) {
     const entry = Array.isArray(page) ? page[0] : page;
     const video = entry && entry.data ? entry.data.video : null;
-    if (!video) throw new Error('VOD が見つかりません / VOD not found');
+    if (!video) throw new Error('VOD が見つかりません');
     const errors = entry.errors;
     if (!video.comments || (Array.isArray(errors) && errors.length)) {
       const first = Array.isArray(errors) && errors[0] ? String(errors[0].message || '') : '';
-      throw new Error('チャット取得が拒否されました / Chat fetch rejected: ' + (first || 'comments: null'));
+      throw new Error('チャット取得が拒否されました: ' + (first || 'comments: null'));
     }
     const block = video.comments;
     const edges = block.edges || [];
@@ -86,7 +86,7 @@ const YTSChat = (function () {
   // parseCommentsPage result -> the cursor to send next. null on the last page. Throws when hasNextPage is true but there is no cursor (empty edges).
   function nextCursor(parsed) {
     if (!parsed.hasNextPage) return null;
-    if (!parsed.cursor) throw new Error('次ページの位置がありません / Next page cursor missing');
+    if (!parsed.cursor) throw new Error('次ページの位置がありません');
     return parsed.cursor;
   }
 
@@ -156,7 +156,7 @@ const YTSChat = (function () {
       if (res.ok) return res.json();
       const retryable = res.status === 429 || res.status >= 500;
       if (!retryable || attempt >= MAX_RETRIES) {
-        throw new Error('Twitch GraphQL の応答が ' + res.status + ' です / Twitch GraphQL returned ' + res.status);
+        throw new Error('Twitch GraphQL の応答が ' + res.status + ' です');
       }
       await wait(RETRY_WAIT_MS);
     }
@@ -165,7 +165,7 @@ const YTSChat = (function () {
   // チャンネルの最新アーカイブ VOD 20 本 / The channel's latest 20 archive VODs
   async function listVods(login) {
     const name = String(login || '').toLowerCase();
-    if (!/^[a-z0-9_]+$/.test(name)) throw new Error('チャンネル名が不正です / Invalid channel login');
+    if (!/^[a-z0-9_]+$/.test(name)) throw new Error('チャンネル名が不正です');
     const json = await postGql({
       query: 'query{user(login:"' + name + '"){videos(first:20 type:ARCHIVE sort:TIME){edges{node{id title lengthSeconds createdAt}}}}}'
     });
@@ -193,7 +193,7 @@ const YTSChat = (function () {
     const all = [];
     let variables = { videoID: String(vodId), contentOffsetSeconds: 0 };
     for (let pageNo = 0; pageNo < MAX_PAGES; pageNo++) {
-      if (signal && signal.aborted) throw new DOMException('中止しました / Aborted', 'AbortError');
+      if (signal && signal.aborted) throw new DOMException('中止しました', 'AbortError');
       const page = await postGql([{
         operationName: 'VideoCommentsByOffsetOrCursor',
         variables: variables,
@@ -206,7 +206,7 @@ const YTSChat = (function () {
       if (cursor === null) return all;
       variables = { videoID: String(vodId), cursor: cursor };
     }
-    throw new Error('チャット取得がページ数の上限（' + MAX_PAGES + '）に達しました / Chat fetch hit the page limit (' + MAX_PAGES + ')');
+    throw new Error('チャット取得がページ数の上限（' + MAX_PAGES + '）に達しました');
   }
 
   return {
