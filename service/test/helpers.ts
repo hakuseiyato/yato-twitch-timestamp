@@ -58,6 +58,9 @@ export async function seedStream(partial: Partial<StreamRow>): Promise<StreamRow
     chat_fetched_at: null,
     chat_fetched_by: null,
     created_at: now,
+    night_requested_at: null,
+    night_done_at: null,
+    night_status: null,
     ...partial,
   };
   const columns = Object.keys(row) as (keyof StreamRow)[];

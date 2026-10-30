@@ -12,6 +12,9 @@ export const VOD_ID_PATTERN = /^[0-9]{1,30}$/;
 const TITLE_MAX = 500;
 // vod_offset_sec / chat_lag_sec の許容範囲（秒）/ Allowed range of vod_offset_sec / chat_lag_sec (seconds)
 const OFFSET_LIMIT_SEC = 3600;
+// 夜の処理の日時・状態の長さの上限 / Length limits of the night-run timestamps and status
+const NIGHT_ISO_MAX = 40;
+const NIGHT_STATUS_MAX = 200;
 
 // 無ければ INSERT、あれば何もしない（スタンプ受信でも使う）。started_at は ISO に揃える
 // 戻り値の channel は呼び出し後に実在する行のもの（既存行なら引数と違うことがある）
@@ -41,6 +44,11 @@ function isTitle(value: unknown): value is string {
 
 function isOffset(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= OFFSET_LIMIT_SEC;
+}
+
+// null か、Date.parse できる 40 文字以内の文字列 / null, or a string of up to 40 chars that Date.parse accepts
+function isIsoOrNull(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && value.length <= NIGHT_ISO_MAX && !Number.isNaN(Date.parse(value)));
 }
 
 // 配信行を引く。無ければ 404 を throw（会員の確認は呼び出し側）/ Loads a stream row. Throws 404 when missing (callers check membership)
@@ -113,8 +121,8 @@ export function registerStreamRoutes(router: Router): void {
     return json(200, { stream });
   });
 
-  // vod_id（null で消す）/ vod_offset_sec / chat_lag_sec / title を更新。知らないキーは無視
-  // Updates vod_id (null clears it) / vod_offset_sec / chat_lag_sec / title. Unknown keys are ignored
+  // vod_id（null で消す）/ vod_offset_sec / chat_lag_sec / title / night_*（null で消す）を更新。知らないキーは無視
+  // Updates vod_id (null clears it) / vod_offset_sec / chat_lag_sec / title / night_* (null clears them). Unknown keys are ignored
   router.add('PATCH', '/api/streams/:id', async (ctx) => {
     const principal = await requireAuth(ctx);
     requireCsrf(ctx, principal);
@@ -140,6 +148,19 @@ export function registerStreamRoutes(router: Router): void {
       if (!isTitle(body.title)) return error(400, 'bad_request');
       sets.push('title = ?');
       values.push(body.title);
+    }
+    // 夜の処理の要求・結果 / Night-run request and outcome
+    for (const key of ['night_requested_at', 'night_done_at'] as const) {
+      if (!(key in body)) continue;
+      if (!isIsoOrNull(body[key])) return error(400, 'bad_request');
+      sets.push(`${key} = ?`);
+      values.push(body[key]);
+    }
+    if ('night_status' in body) {
+      const status = body.night_status;
+      if (status !== null && (typeof status !== 'string' || status.length > NIGHT_STATUS_MAX)) return error(400, 'bad_request');
+      sets.push('night_status = ?');
+      values.push(status);
     }
     if (sets.length === 0) return json(200, { stream: current });
     const stream = await ctx.env.DB.prepare(`UPDATE streams SET ${sets.join(', ')} WHERE stream_id = ? RETURNING *`)

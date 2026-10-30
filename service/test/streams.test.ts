@@ -173,4 +173,25 @@ describe('streams', () => {
     const row = await env.DB.prepare('SELECT * FROM streams WHERE stream_id = ?').bind('9100').first<StreamRow>();
     expect(row).toMatchObject({ channel: 'st_j', started_at: '2026-10-10T00:00:00.000Z', title: 'one', chat_lag_sec: 5 });
   });
+
+  it('PATCH accepts the night request/done/status fields', async () => {
+    await seedChannel('st_n', 'owner_sn');
+    await seedStream({ stream_id: '7001', channel: 'st_n', started_at: '2026-10-30T06:00:00Z' });
+    const res = await call('owner_sn', 'PATCH', '/api/streams/7001', {
+      night_requested_at: '2026-10-30T13:00:00Z', night_status: '処理中: VOD 保存', night_done_at: null,
+    });
+    expect(res.status).toBe(200);
+    const { stream } = (await res.json()) as { stream: StreamRow };
+    expect(stream).toMatchObject({ night_requested_at: '2026-10-30T13:00:00Z', night_status: '処理中: VOD 保存', night_done_at: null });
+    const list = await call('owner_sn', 'GET', '/api/channels/st_n/streams');
+    expect(((await list.json()) as { streams: StreamRow[] }).streams[0].night_status).toBe('処理中: VOD 保存');
+  });
+
+  it('PATCH rejects malformed night fields', async () => {
+    await seedChannel('st_m', 'owner_sm');
+    await seedStream({ stream_id: '7002', channel: 'st_m', started_at: '2026-10-30T06:00:00Z' });
+    for (const body of [{ night_requested_at: 'yesterday' }, { night_status: 'x'.repeat(201) }, { night_done_at: 12 }]) {
+      expect((await call('owner_sm', 'PATCH', '/api/streams/7002', body)).status).toBe(400);
+    }
+  });
 });

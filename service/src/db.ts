@@ -30,6 +30,10 @@ export interface StreamRow {
   chat_fetched_at: string | null;
   chat_fetched_by: string | null;
   created_at: string;
+  // 夜の処理の要求・結果 / Night-run request and outcome
+  night_requested_at: string | null;
+  night_done_at: string | null;
+  night_status: string | null;
 }
 
 export interface StampRow {
