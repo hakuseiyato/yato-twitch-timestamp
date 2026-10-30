@@ -763,19 +763,19 @@ function ytsCreateShorts(p) {
         t.ticks = String(Math.round(sec * TICKS_PER_SEC));
         return t;
     };
-    if (!seq) return "ERR|アクティブなシーケンスがありません / No active sequence";
+    if (!seq) return "ERR|アクティブなシーケンスがありません";
     p = p || {};
     preSec = Number(p.preSec);
     postSec = Number(p.postSec);
     if (!isFinite(preSec) || preSec < 0 || !isFinite(postSec) || postSec <= 0) {
-        return "ERR|前後の秒数を確認してください / Check the before/after seconds";
+        return "ERR|前後の秒数を確認してください";
     }
     binName = String(p.binName || "Peakaboo_Shorts");
     try {
         origIn = parseFloat(seq.getInPoint());
         origOut = parseFloat(seq.getOutPoint());
         seqEndSec = parseFloat(seq.end) / TICKS_PER_SEC;
-        if (!isFinite(seqEndSec) || seqEndSec <= 0) throw new Error("シーケンスの長さを読めません / Could not read the sequence length");
+        if (!isFinite(seqEndSec) || seqEndSec <= 0) throw new Error("シーケンスの長さを読めません");
 
         list = ytsMarkerArray(seq.markers);
         for (i = 0; i < list.length; i += 1) {
@@ -843,7 +843,7 @@ function ytsCreateShorts(p) {
         }
         result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped });
     } catch (e) {
-        result = "ERR|" + created + " 件作成後に失敗 / Failed after creating " + created + ": " + e.toString();
+        result = "ERR|" + created + " 件作成後に失敗: " + e.toString();
     } finally {
         // In/Out を一度でも動かし、かつ元の In と Out の両方が読めたときだけ戻す。In を 2 回置くのは、途中の In/Out と前後が入れ替わって弾かれるのを避けるため
         // Restore only when this run moved In/Out and both originals were read. In is set twice so a reversed intermediate order cannot reject it.
@@ -858,8 +858,7 @@ function ytsCreateShorts(p) {
         try { app.project.activeSequence = seq; } catch (activateError) {}
     }
     if (restoreError) {
-        return "ERR|" + created + " 件作成しましたが In/Out を戻せませんでした / Created " + created +
-            ", but could not restore In/Out: " + restoreError.toString();
+        return "ERR|" + created + " 件作成しましたが In/Out を戻せませんでした: " + restoreError.toString();
     }
     return result;
 }

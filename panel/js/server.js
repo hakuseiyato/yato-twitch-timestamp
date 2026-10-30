@@ -49,7 +49,7 @@ const YTSServer = (function () {
 
   // lib が要る関数で呼ぶ。読めていなければ日英の Error / Called by functions that need lib; throws a bilingual Error when it is missing
   function requireLib() {
-    if (!lib) throw new Error('lib.js を読み込めませんでした。panel\\install.ps1 を再実行してください / lib.js failed to load. Re-run panel\\install.ps1');
+    if (!lib) throw new Error('lib.js を読み込めませんでした。panel\\install.ps1 を再実行してください');
     return lib;
   }
 
@@ -61,11 +61,11 @@ const YTSServer = (function () {
     try {
       url = new URL(String(input.serverUrl || '').trim());
     } catch (error) {
-      throw new Error('サーバー URL が正しくありません / Invalid server URL');
+      throw new Error('サーバー URL が正しくありません');
     }
-    if (url.protocol !== 'https:') throw new Error('サーバー URL は https:// で始めてください / The server URL must start with https://');
+    if (url.protocol !== 'https:') throw new Error('サーバー URL は https:// で始めてください');
     const token = String(input.token || '').trim();
-    if (!token) throw new Error('トークンを入力してください / Enter a token');
+    if (!token) throw new Error('トークンを入力してください');
     return { serverUrl: url.origin, token: token };
   }
 
@@ -77,11 +77,11 @@ const YTSServer = (function () {
   }
 
   function messageForStatus(status) {
-    if (status === 401) return 'トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me';
-    if (status === 403) return 'このチャンネルの会員ではありません / Not a member of this channel';
-    if (status === 404) return 'サーバーに見つかりません (404) / Not found on the server (404)';
-    if (requireLib().isRetryableUpload(status)) return 'サーバーが一時的に応答しません (' + status + ') / Server temporarily unavailable (' + status + ')';
-    return 'サーバーがエラーを返しました (' + status + ') / Server returned an error (' + status + ')';
+    if (status === 401) return 'トークンが無効です。Web の /me で発行し直してください';
+    if (status === 403) return 'このチャンネルの会員ではありません';
+    if (status === 404) return 'サーバーに見つかりません (404)';
+    if (requireLib().isRetryableUpload(status)) return 'サーバーが一時的に応答しません (' + status + ')';
+    return 'サーバーがエラーを返しました (' + status + ')';
   }
 
   // Bearer トークン付きで JSON をやり取りする。非 2xx は {status, error, detail, message} の Error を throw
@@ -92,7 +92,7 @@ const YTSServer = (function () {
     const opts = options || {};
     const settings = opts.settings || loadSettings();
     if (!settings.serverUrl || !settings.token) {
-      throw apiError(0, 'not_configured', '', 'サーバー URL とトークンを設定してください / Set the server URL and token');
+      throw apiError(0, 'not_configured', '', 'サーバー URL とトークンを設定してください');
     }
     const headers = { Authorization: 'Bearer ' + settings.token };
     const init = { method: opts.method || 'GET', headers: headers };
@@ -104,7 +104,7 @@ const YTSServer = (function () {
     try {
       response = await fetchImpl(settings.serverUrl + path, init);
     } catch (error) {
-      throw apiError(0, 'network', error && error.message ? error.message : String(error), 'サーバーに接続できません / Cannot reach the server');
+      throw apiError(0, 'network', error && error.message ? error.message : String(error), 'サーバーに接続できません');
     }
     let data = null;
     try {
@@ -128,14 +128,14 @@ const YTSServer = (function () {
 
   async function listStreams(channel) {
     const data = await api('/api/channels/' + encodeURIComponent(channel) + '/streams');
-    if (!data || !Array.isArray(data.streams)) throw apiError(200, 'http_200', '', 'サーバーの応答が不正です / Unexpected server response');
+    if (!data || !Array.isArray(data.streams)) throw apiError(200, 'http_200', '', 'サーバーの応答が不正です');
     return data.streams;
   }
 
   // 墓標込みの全件 / All records including tombstones
   async function pullStamps(streamId) {
     const data = await api('/api/streams/' + encodeURIComponent(streamId) + '/stamps');
-    if (!data || !Array.isArray(data.records)) throw apiError(200, 'http_200', '', 'サーバーの応答が不正です / Unexpected server response');
+    if (!data || !Array.isArray(data.records)) throw apiError(200, 'http_200', '', 'サーバーの応答が不正です');
     return data.records;
   }
 
@@ -152,7 +152,7 @@ const YTSServer = (function () {
       try {
         response = await api('/api/stamps', { method: 'POST', body: { records: batches[i].records, source: 'panel' } });
         if (!response || !Array.isArray(response.accepted) || !Array.isArray(response.rejected)) {
-          throw apiError(200, 'http_200', '', 'サーバーの応答が不正です / Unexpected server response');
+          throw apiError(200, 'http_200', '', 'サーバーの応答が不正です');
         }
       } catch (error) {
         // 未設定は status 0 でも再送で直らない / Missing settings are not fixed by a retry despite status 0

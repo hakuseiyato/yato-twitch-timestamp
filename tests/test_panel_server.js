@@ -103,19 +103,19 @@ const tokenSettings = JSON.stringify({ serverUrl: 'https://h.example', token: 'y
     YTSServer.configure({ fetch: createFakeFetch(() => ({ status: 401, body: { error: 'unauthorized' } })), storage: storage });
     await assert.rejects(YTSServer.me(), (error) => {
       assert.strictEqual(error.status, 401); assert.strictEqual(error.error, 'unauthorized');
-      assert.strictEqual(error.message, 'トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me');
+      assert.strictEqual(error.message, 'トークンが無効です。Web の /me で発行し直してください');
       return true;
     });
     YTSServer.configure({ fetch: createFakeFetch(() => ({ status: 403, body: { error: 'forbidden', detail: 'not_member' } })) });
     await assert.rejects(YTSServer.listStreams('c'), (error) => {
       assert.strictEqual(error.status, 403); assert.strictEqual(error.detail, 'not_member');
-      assert.strictEqual(error.message, 'このチャンネルの会員ではありません / Not a member of this channel');
+      assert.strictEqual(error.message, 'このチャンネルの会員ではありません');
       return true;
     });
     YTSServer.configure({ fetch: async () => { throw new TypeError('Failed to fetch'); } });
     await assert.rejects(YTSServer.me(), (error) => {
       assert.strictEqual(error.status, 0); assert.strictEqual(error.error, 'network');
-      assert.strictEqual(error.message, 'サーバーに接続できません / Cannot reach the server');
+      assert.strictEqual(error.message, 'サーバーに接続できません');
       return true;
     });
     // 本文が JSON でない 500 も status 付きで throw / A 500 with a non-JSON body still throws with its status
@@ -227,9 +227,9 @@ const tokenSettings = JSON.stringify({ serverUrl: 'https://h.example', token: 'y
     assert.doesNotThrow(() => vm.runInContext(source, context));
     assert.strictEqual(vm.runInContext('typeof YTSServer', context), 'object');
     assert.ok(context.window.YTSServer, 'window.YTSServer must be set');
-    // lib が要る関数は呼んだときに日英の Error / Functions needing lib throw a bilingual Error when called
+    // lib が要る関数は呼んだときに日本語の Error / Functions needing lib throw a Japanese Error when called
     context.window.YTSServer.configure({ storage: createFakeStorage({ 'yts.server': tokenSettings }), fetch: createFakeFetch(() => ({ status: 200, body: {} })) });
-    await assert.rejects(context.window.YTSServer.pushStamps(makeRecords(1)), /lib\.js を読み込めませんでした.* \/ lib\.js/);
+    await assert.rejects(context.window.YTSServer.pushStamps(makeRecords(1)), /lib\.js を読み込めませんでした。panel\\install\.ps1 を再実行してください$/);
   }
 
   console.log('all tests passed');

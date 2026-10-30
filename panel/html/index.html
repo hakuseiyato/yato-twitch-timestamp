@@ -14,18 +14,18 @@
       <button id="pickCsv" class="small secondary" type="button" title="同期 CSV を選択" aria-label="同期 CSV を選択">CSV</button>
       <button id="mergeCsv" class="small secondary" type="button" title="ほかの CSV を同期ファイルに統合（複数選択可）" aria-label="CSV を統合">統合</button>
       <div class="server-control">
-        <button id="serverBtn" class="small secondary" type="button" title="サーバーの配信を同期元にする / Use a server stream as the sync source" aria-label="サーバー / Server" aria-haspopup="dialog" aria-expanded="false">サーバー</button>
-        <div id="serverPopover" class="server-popover" role="dialog" aria-label="サーバー / Server" hidden>
+        <button id="serverBtn" class="small secondary" type="button" title="サーバーの配信を同期元にする" aria-label="サーバー" aria-haspopup="dialog" aria-expanded="false">サーバー</button>
+        <div id="serverPopover" class="server-popover" role="dialog" aria-label="サーバー" hidden>
           <label class="server-field"><span>URL</span><input id="serverUrl" type="url" placeholder="https://…workers.dev" autocomplete="off" spellcheck="false"></label>
-          <label class="server-field"><span>トークン / Token</span><input id="serverToken" type="password" placeholder="ytt_…" autocomplete="off" spellcheck="false"></label>
+          <label class="server-field"><span>トークン</span><input id="serverToken" type="password" placeholder="ytt_…" autocomplete="off" spellcheck="false"></label>
           <div class="server-buttons">
-            <button id="serverConnect" class="primary" type="button">接続 / Connect</button>
-            <button id="serverClose" class="secondary" type="button">閉じる / Close</button>
+            <button id="serverConnect" class="primary" type="button">接続</button>
+            <button id="serverClose" class="secondary" type="button">閉じる</button>
           </div>
           <div id="serverPicker" class="server-picker" hidden>
-            <label class="server-field"><span>チャンネル / Channel</span><select id="serverChannel"></select></label>
-            <label class="server-field"><span>配信 / Stream</span><select id="serverStream"></select></label>
-            <button id="serverOpen" class="primary" type="button" disabled>この配信を開く / Open this stream</button>
+            <label class="server-field"><span>チャンネル</span><select id="serverChannel"></select></label>
+            <label class="server-field"><span>配信</span><select id="serverStream"></select></label>
+            <button id="serverOpen" class="primary" type="button" disabled>この配信を開く</button>
           </div>
         </div>
       </div>
@@ -52,16 +52,16 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"></path></svg>
       </button>
       <div class="shorts-control">
-        <button id="shortsBtn" class="small secondary icon-button" type="button" title="候補から Sequence を作る / Create Short sequences" aria-label="候補から Sequence を作る" aria-haspopup="dialog" aria-expanded="false" disabled>
+        <button id="shortsBtn" class="small secondary icon-button" type="button" title="候補から Sequence を作る" aria-label="候補から Sequence を作る" aria-haspopup="dialog" aria-expanded="false" disabled>
           <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1.5"></rect><path d="M6 5.5v5l4-2.5z"></path></svg>
         </button>
-        <div id="shortsPopover" class="offset-popover shorts-popover" role="dialog" aria-label="Short Sequence" hidden>
-          <label class="server-field"><span>前 / Before (s)</span><input id="shortsPre" type="number" min="0" step="1" value="15"></label>
-          <label class="server-field"><span>後 / After (s)</span><input id="shortsPost" type="number" min="1" step="1" value="45"></label>
-          <label class="shorts-check"><input id="shortsIncludeHuman" type="checkbox"> 人のマーカーも / Include human markers</label>
+        <div id="shortsPopover" class="offset-popover shorts-popover" role="dialog" aria-label="候補から Sequence を作る" hidden>
+          <label class="server-field"><span>前（秒）</span><input id="shortsPre" type="number" min="0" step="1" value="15"></label>
+          <label class="server-field"><span>後（秒）</span><input id="shortsPost" type="number" min="1" step="1" value="45"></label>
+          <label class="shorts-check"><input id="shortsIncludeHuman" type="checkbox"> 人のマーカーも</label>
           <div class="server-buttons">
-            <button id="shortsCreate" class="primary" type="button">作成 / Create</button>
-            <button id="shortsClose" class="secondary" type="button">閉じる / Close</button>
+            <button id="shortsCreate" class="primary" type="button">作成</button>
+            <button id="shortsClose" class="secondary" type="button">閉じる</button>
           </div>
         </div>
       </div>

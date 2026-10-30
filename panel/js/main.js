@@ -112,7 +112,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let serverPulled = { path: '', byId: new Map() };
   // pull の結果を同期の完了メッセージに添える / The pull result, added to the sync's completion message
   let serverSyncNote = '';
-  const ZERO_STAMPS_MESSAGE = 'サーバーの配信を開きました（スタンプ 0 件）/ Opened server stream (no stamps yet)';
+  const ZERO_STAMPS_MESSAGE = 'サーバーの配信を開きました（スタンプ 0 件）';
 
   thumbnailVideo.muted = true;
   thumbnailVideo.preload = 'auto';
@@ -184,7 +184,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       text = '未紐付け: ' + activeInfo.name;
     }
     // サーバーの鏡 CSV を開いているときは目印を付ける / Mark when a server mirror CSV is open
-    if (!failed && isServerMirror(csvFilePath)) text = 'サーバー / server · ' + text;
+    if (!failed && isServerMirror(csvFilePath)) text = 'サーバー · ' + text;
     elements.linkState.textContent = text;
     elements.linkState.title = text;
   }
@@ -244,7 +244,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
   async function createShorts() {
     const pre = Number(elements.shortsPre.value), post = Number(elements.shortsPost.value);
-    if (!(pre >= 0) || !(post > 0)) { setStatus('前後の秒数を確認してください / Check the before/after seconds', 'error'); return; }
+    if (!(pre >= 0) || !(post > 0)) { setStatus('前後の秒数を確認してください', 'error'); return; }
     try {
       localStorage.setItem(shortsStorageKeys.pre, String(pre));
       localStorage.setItem(shortsStorageKeys.post, String(post));
@@ -254,11 +254,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, binName: 'Peakaboo_Shorts', prefix: 'Short_' }) + ')', true);
       // skipped = 範囲が取れない、または Sequence を作れなかったマーカー / skipped = markers with no usable range or whose sequence could not be created
       if (!out.created) {
-        setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : '') +
-          ' / No candidate markers' + (out.skipped ? ' (' + out.skipped + ' skipped)' : ''), '');
+        setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : ''), '');
       } else {
-        setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : '') +
-          ' / Created ' + out.created + ' sequences (Peakaboo_Shorts)' + (out.skipped ? ', ' + out.skipped + ' skipped' : ''), 'ok');
+        setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : ''), 'ok');
       }
       closeShortsPopover();
     } catch (error) { setStatus(messageOf(error), 'error'); } finally { setBusy(false); }
@@ -469,8 +467,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     const mirrorOpen = isServerMirror(csvFilePath);
     elements.mergeCsv.disabled = busy || !csvFilePath || mirrorOpen;
     elements.mergeCsv.title = mirrorOpen
-      ? 'サーバーの配信では統合できません。古い CSV は Chrome 拡張の「CSV を取り込む」でサーバーへ送ってください / ' +
-        'Merging is disabled for server streams. Import old CSVs through the Chrome extension so they reach the server'
+      ? 'サーバーの配信では統合できません。古い CSV は Chrome 拡張の「CSV を取り込む」でサーバーへ送ってください'
       : 'ほかの CSV を同期ファイルに統合（複数選択可）';
     elements.serverBtn.disabled = busy || !serverReady;
     updateServerControls();
@@ -2089,7 +2086,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       current = current && current !== '/' ? current + '/' + part : current + part;
       window.cep.fs.makedir(current);
     });
-    if (!pathExists(dir)) throw new Error('鏡 CSV のフォルダを作れませんでした / Could not create the mirror folder: ' + dir);
+    if (!pathExists(dir)) throw new Error('鏡 CSV のフォルダを作れませんでした: ' + dir);
   }
 
   // 鏡 CSV の横の <stream_id>.server.json / The <stream_id>.server.json next to a mirror CSV
@@ -2147,8 +2144,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   function assertMirrorServer(meta) {
     const settings = YTSServer.loadSettings();
     if (settings.serverUrl && settings.serverUrl !== meta.serverUrl) {
-      throw new Error('この鏡 CSV は別のサーバー（' + meta.serverUrl + '）のものです。「サーバー」で接続し直してください / ' +
-        'This mirror CSV belongs to another server (' + meta.serverUrl + '). Reconnect with "サーバー"');
+      throw new Error('この鏡 CSV は別のサーバー（' + meta.serverUrl + '）のものです。「サーバー」で接続し直してください');
     }
   }
 
@@ -2157,7 +2153,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   async function pullIntoMirror(csvPath) {
     try {
       const meta = readServerMeta(csvPath);
-      if (!meta) throw new Error('鏡 CSV の情報（.server.json）を読めません / Cannot read the mirror info (.server.json)');
+      if (!meta) throw new Error('鏡 CSV の情報（.server.json）を読めません');
       assertMirrorServer(meta);
       const serverRecords = await YTSServer.pullStamps(meta.stream_id);
       const parsed = TSLib.parseCsv(readText(csvPath));
@@ -2179,12 +2175,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       delete nextMeta.forcePull;
       writeServerMeta(csvPath, nextMeta);
       if (merged.changed > 0) {
-        serverSyncNote = 'サーバーから ' + merged.changed + ' 件取り込み / pulled ' + merged.changed;
+        serverSyncNote = 'サーバーから ' + merged.changed + ' 件取り込み';
         setStatus(serverSyncNote, 'ok');
       }
       return true;
     } catch (error) {
-      setStatus('サーバーから取り込めないため同期を中止しました / Sync stopped: could not pull from the server: ' + messageOf(error), 'error');
+      setStatus('サーバーから取り込めないため同期を中止しました: ' + messageOf(error), 'error');
       return false;
     }
   }
@@ -2223,12 +2219,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       pushError = pushError || error;
     }
     const notes = [];
-    if (sorted.okIds.length) notes.push('サーバーへ ' + sorted.okIds.length + ' 件送信 / pushed ' + sorted.okIds.length);
+    if (sorted.okIds.length) notes.push('サーバーへ ' + sorted.okIds.length + ' 件送信');
     if (sorted.failed.length) {
       const reasons = Array.from(new Set(sorted.failed.map(function (item) { return TSLib.reasonText(item.reason); })));
-      notes.push('送れなかった ' + sorted.failed.length + ' 件: ' + reasons.join('、') + ' / failed ' + sorted.failed.length);
+      notes.push('送れなかった ' + sorted.failed.length + ' 件: ' + reasons.join('、'));
     }
-    if (pushError) notes.push('サーバーへの送信は次回に再試行 / push will retry: ' + messageOf(pushError));
+    if (pushError) notes.push('サーバーへの送信は次回に再試行: ' + messageOf(pushError));
     return { note: notes.join(' / '), failed: !!pushError || sorted.failed.length > 0 };
   }
 
@@ -2261,7 +2257,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     const pad = function (value) { return String(value).padStart(2, '0'); };
     const when = Number.isFinite(date.getTime())
       ? date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
-      : '開始時刻不明 / unknown start';
+      : '開始時刻不明';
     return when + ' · ' + (stream.title || stream.stream_id) + ' · スタンプ ' + (Number(stream.stamp_count) || 0);
   }
 
@@ -2281,7 +2277,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
         option.title = option.textContent;
         elements.serverStream.appendChild(option);
       });
-      if (!serverStreams.length) setStatus(channel + ': サーバーに配信がありません / No streams on the server', '');
+      if (!serverStreams.length) setStatus(channel + ': サーバーに配信がありません', '');
     } catch (error) {
       setStatus(messageOf(error), 'error');
     } finally {
@@ -2326,10 +2322,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.serverPicker.hidden = false;
     updateServerControls();
     if (!channels.length) {
-      setStatus(serverLogin + ': 会員のチャンネルがありません / Not a member of any channel', 'error');
+      setStatus(serverLogin + ': 会員のチャンネルがありません', 'error');
       return;
     }
-    setStatus(serverLogin + ' としてサーバーに接続しました / Connected to the server as ' + serverLogin, 'ok');
+    setStatus(serverLogin + ' としてサーバーに接続しました', 'ok');
     await loadServerStreams();
   }
 
@@ -2374,8 +2370,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     await loadCsvPath(mirrorPath, true);
     let opened = '';
     if (csvFilePath === mirrorPath && groups.length) {
-      opened = merged.records.length ? 'サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
-        merged.changed + ' merged）' : ZERO_STAMPS_MESSAGE;
+      opened = merged.records.length ? 'サーバー: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件）' : ZERO_STAMPS_MESSAGE;
       setStatus(opened, 'ok');
     }
     await refreshMarkers();
