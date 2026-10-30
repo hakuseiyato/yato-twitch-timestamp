@@ -28,6 +28,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     shortsIncludeHuman: document.getElementById('shortsIncludeHuman'),
     shortsCreate: document.getElementById('shortsCreate'),
     shortsClose: document.getElementById('shortsClose'),
+    importStreamBtn: document.getElementById('importStreamBtn'),
+    importPopover: document.getElementById('importPopover'),
+    importRoot: document.getElementById('importRoot'),
+    importPlan: document.getElementById('importPlan'),
+    importRun: document.getElementById('importRun'),
+    importClose: document.getElementById('importClose'),
     stream: document.getElementById('stream'),
     offsetBtn: document.getElementById('offsetBtn'),
     offsetLabel: document.getElementById('offsetLabel'),
@@ -59,7 +65,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     markerList: document.getElementById('markerList')
   };
   const storageKey = 'yts.csvPath.' + hostApp;
-  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.serverBtn, elements.exportFramesBtn, elements.shortsBtn, elements.shortsCreate, elements.stream, elements.offsetBtn, elements.linkTarget,
+  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.serverBtn, elements.exportFramesBtn, elements.shortsBtn, elements.shortsCreate, elements.importStreamBtn, elements.importRun, elements.stream, elements.offsetBtn, elements.linkTarget,
     elements.refreshBtn, elements.addUntagged, elements.addMarkerBtn, elements.syncBtn, elements.executeBtn];
   const offsetControls = [elements.offsetInput, elements.offsetMinusSec, elements.offsetPlusSec,
     elements.offsetMinusFrame, elements.offsetPlusFrame, elements.offsetReset];
@@ -122,6 +128,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
   // AE にはシーケンスが無いので Shorts ボタンを出さない / After Effects has no sequences, so the Shorts button is hidden.
   elements.shortsBtn.hidden = hostApp !== 'PPRO';
+  // 「配信を取り込む」も Premiere だけ / "配信を取り込む" is Premiere-only too.
+  elements.importStreamBtn.hidden = hostApp !== 'PPRO';
 
   elements.linkTarget.title = hostApp === 'PPRO'
     ? 'アクティブなシーケンスに紐付け'
@@ -495,6 +503,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.exportFramesBtn.title = '全マーカーを画像で書き出す（保存先を選択）';
     elements.shortsBtn.disabled = busy || hostApp !== 'PPRO' || !activeInfo || !activeInfo.hasTarget;
     elements.shortsCreate.disabled = busy;
+    elements.importStreamBtn.disabled = busy || hostApp !== 'PPRO' || !serverReady || !window.YTSImport;
+    elements.importRun.disabled = busy || !elements.importPlan.value;
     elements.refreshBtn.disabled = busy;
     elements.stream.disabled = busy || !groups.length || linked;
     elements.stream.hidden = !(groups.length >= 2 && !activeEntry);
@@ -691,7 +701,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   // Right after the user loads a CSV: link the open sequence/comp if it is not linked yet (never re-links,
   // so sync history is kept), then go straight to sync. The first sync still stops at the confirm drawer.
   // Returns false when it did nothing (no target, several streams, ...), so the caller can show its own message.
-  async function autoLinkAndSync(prefix) {
+  // options（省略可）: userOffset = 新しく紐付けるときのオフセット秒、skipConfirm = syncNow へそのまま渡す
+  // options (optional): userOffset = offset seconds used when newly linking, skipConfirm = passed through to syncNow.
+  async function autoLinkAndSync(prefix, options) {
+    const opts = options || {};
     if (!csvFilePath || groups.length !== 1 || !selectedGroup()) return false;
     try {
       let info;
@@ -700,11 +713,13 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const sidecarPath = getSidecarPath(csvFilePath);
       let autoLinked = false;
       if (!readSidecar(sidecarPath).targets[targetKey(info)]) {
+        // linkTarget は userOffsetSec を紐付けに書く。オフセット欄と同じ setOffset で入れる / linkTarget stores userOffsetSec; set through setOffset like the offset controls
+        if (Number.isFinite(opts.userOffset)) setOffset(opts.userOffset);
         await linkTarget();
         if (!readSidecar(sidecarPath).targets[targetKey(info)]) return true; // linking failed; its error is already shown
         autoLinked = true;
       }
-      await syncNow(true);
+      await syncNow(true, opts);
       const notes = [];
       if (prefix) notes.push(prefix);
       notes.push(elements.status.textContent);
@@ -1994,7 +2009,11 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   // afterImport: called right after a CSV pick / conversion / merge; then anything but additions asks first.
-  async function syncNow(afterImport) {
+  // options.skipConfirm: 理由が「初回の同期」「アプリへの追加が多い」だけなら引き出しを出さずに同期する（取り込みで作ったばかりの Sequence 用）
+  // options.skipConfirm: sync without the drawer when the only reasons are 初回の同期 / アプリへの追加が多い (for a sequence the import just created).
+  const SKIPPABLE_CONFIRM_REASONS = ['初回の同期', 'アプリへの追加が多い'];
+  async function syncNow(afterImport, options) {
+    const skipConfirm = !!(options && options.skipConfirm);
     // Drop any earlier preview so a failed recompute never leaves a stale drawer executable.
     invalidatePreview();
     setBusy(true);
@@ -2013,7 +2032,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
           repaired: state.repaired,
           afterImport: afterImport === true
         });
-        if (reasons.length > 0) {
+        const confirmSkipped = skipConfirm && !plan.error &&
+          reasons.every(function (reason) { return SKIPPABLE_CONFIRM_REASONS.indexOf(reason) >= 0; });
+        if (reasons.length > 0 && !confirmSkipped) {
           openDrawer();
           setStatus(plan.error ? String(plan.error) : '同期内容を確認してください（' + reasons.join('、') + '）',
             plan.error ? 'error' : 'ok');
@@ -2351,7 +2372,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
   // サーバーの記録を鏡 CSV に取り込み、meta を書いて、その CSV を開く
   // Merges the server records into the mirror CSV, writes the meta, and opens that CSV.
-  async function openServerStream(stream) {
+  // options（省略可）は autoLinkAndSync へ渡す（取り込みの userOffset / skipConfirm） / options (optional) go to autoLinkAndSync (the import's userOffset / skipConfirm)
+  async function openServerStream(stream, options) {
     const settings = YTSServer.loadSettings();
     let mirrorPath = '';
     let merged = null;
@@ -2397,7 +2419,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     // 「CSV」で開いたときと同じく、未紐付けなら紐付けてそのまま同期する（初回は確認の引き出しで止まる）
     // As with opening via "CSV": link if not linked yet and sync right away (the first sync stops at the confirm drawer).
     if (!samePath(csvFilePath, mirrorPath)) return;
-    if (!(await autoLinkAndSync(opened)) && opened) setStatus(opened, 'ok');
+    if (!(await autoLinkAndSync(opened, options)) && opened) setStatus(opened, 'ok');
   }
 
   function openServerPopover() {
@@ -2414,6 +2436,270 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     } else {
       (settings.serverUrl ? elements.serverToken : elements.serverUrl).focus();
     }
+  }
+
+  // ---- 配信を取り込む: 夜の処理の peakaboo.json → 素材・同期・Short・チャット動画・字幕 ----------
+  // ---- 配信を取り込む: the night run's peakaboo.json → footage, sync, Shorts, chat videos, captions --
+
+  const FOOTAGE_ROOT_KEY = 'yts.footageRoot';
+  const DEFAULT_FOOTAGE_ROOT = 'D:\\Work_HDD\\寺乃なあ\\Footage';
+
+  function footageRoot() {
+    let value = '';
+    try { value = localStorage.getItem(FOOTAGE_ROOT_KEY) || ''; } catch (storageError) {}
+    return (value || DEFAULT_FOOTAGE_ROOT).replace(/[\\/]+$/, '');
+  }
+
+  function saveFootageRoot() {
+    const value = elements.importRoot.value.trim();
+    try {
+      if (value) localStorage.setItem(FOOTAGE_ROOT_KEY, value);
+      else localStorage.removeItem(FOOTAGE_ROOT_KEY);
+    } catch (storageError) {}
+    listImportPlans();
+  }
+
+  // フォルダの中の名前（読めなければ空） / Names inside a folder (empty when unreadable)
+  function listDir(dir) {
+    const result = window.cep.fs.readdir(dir);
+    return result && result.err === 0 && Array.isArray(result.data) ? result.data : [];
+  }
+
+  // 新しい _YYMMDD から順に、取り込み計画があるいちばん新しいフォルダの計画を並べる
+  // Lists the plans of the newest _YYMMDD folder that has any.
+  function listImportPlans() {
+    const root = footageRoot();
+    elements.importRoot.value = root;
+    clearChildren(elements.importPlan);
+    const folders = YTSImport.planFolders(listDir(root));
+    for (let i = 0; i < folders.length; i += 1) {
+      const files = YTSImport.planFiles(listDir(root + '\\' + folders[i]));
+      files.forEach(function (name) {
+        const option = document.createElement('option');
+        option.value = root + '\\' + folders[i] + '\\' + name;
+        option.textContent = folders[i] + ' / ' + name;
+        option.title = option.value;
+        elements.importPlan.appendChild(option);
+      });
+      if (files.length) break;
+    }
+    if (!elements.importPlan.options.length) setStatus('peakaboo.json が見つかりません（Footage の場所: ' + root + '）', 'error');
+    updateControls();
+  }
+
+  function openImportPopover() {
+    elements.importPopover.hidden = false;
+    elements.importStreamBtn.setAttribute('aria-expanded', 'true');
+    listImportPlans();
+  }
+
+  function closeImportPopover() {
+    elements.importPopover.hidden = true;
+    elements.importStreamBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  // 飛ばした理由。count は「理由 N」に、note は同じ文を 1 行にまとめる
+  // Skip reasons: count() becomes "reason N"; note() collapses identical texts into one line.
+  function createSkipList() {
+    const counts = new Map();
+    const notes = new Map();
+    return {
+      count: function (label) { counts.set(label, (counts.get(label) || 0) + 1); },
+      note: function (text) { notes.set(text, (notes.get(text) || 0) + 1); },
+      list: function () {
+        const out = [];
+        counts.forEach(function (n, label) { out.push(label + ' ' + n); });
+        notes.forEach(function (n, text) { out.push(n > 1 ? text + '（' + n + ' 件）' : text); });
+        return out;
+      }
+    };
+  }
+
+  // 計画を書き戻す（他のキーはそのまま） / Writes the plan back (other keys untouched)
+  function writePlan(planPath, plan) {
+    atomicWrite(planPath, JSON.stringify(plan, null, 2) + '\n');
+  }
+
+  // (1) 素材を読み込み、フル尺 Sequence を作って（既にあれば使って）開く / (1) Import the footage and create (or reuse) and open the full-length sequence
+  async function importPlanFootage(plan) {
+    setBusy(true);
+    setStatus('素材を読み込み中', '');
+    return callHost('ytsImportStream(' + hostLiteral({ footage: plan.footage, dateTag: plan.date_tag, sequenceName: YTSImport.sequenceName(plan) }) + ')', true);
+  }
+
+  // plan に channel は無いので、ピッカーのチャンネル → 会員のチャンネルの順に配信行を探す
+  // The plan has no channel, so the stream row is looked up in the picker's channel, then in every member channel.
+  async function findServerStream(streamId) {
+    const channels = elements.serverChannel.value ? [elements.serverChannel.value] : [];
+    const me = await YTSServer.me();
+    serverLogin = String((me && me.login) || serverLogin);
+    (me && Array.isArray(me.channels) ? me.channels : []).forEach(function (channel) {
+      if (channels.indexOf(channel.login) < 0) channels.push(channel.login);
+    });
+    for (let i = 0; i < channels.length; i += 1) {
+      const rows = await YTSServer.listStreams(channels[i]);
+      const row = rows.find(function (item) { return item.stream_id === streamId; });
+      if (row) return Object.assign({ channel: channels[i] }, row);
+    }
+    return null;
+  }
+
+  // (2)(3) サーバーの配信を開いて紐付け・同期する。Short 作成へ進めるときだけ true
+  // (2)(3) Open the server stream, link and sync. True only when Short creation may go on.
+  async function syncPlanStream(plan, imported) {
+    setBusy(true);
+    setStatus('同期中', '');
+    const streamId = String(plan.stream_id || '');
+    const row = await findServerStream(streamId);
+    if (!row) {
+      setStatus('サーバーに配信 ' + streamId + ' がありません', 'error');
+      return false;
+    }
+    // 配信時刻 = VOD 時刻 + vod_offset_sec。素材は VOD なのでマーカーは −vod_offset_sec ずらす
+    // Stream time = VOD time + vod_offset_sec; the footage is the VOD, so markers shift by −vod_offset_sec.
+    await openServerStream(row, { skipConfirm: !imported.existing, userOffset: -(Number(row.vod_offset_sec) || 0) });
+    if (elements.status.classList.contains('error')) return false;
+    if (!activeEntry || activeEntry.stream_id !== row.stream_id) {
+      setStatus('フル尺 Sequence をサーバーの配信に紐付けできませんでした', 'error');
+      return false;
+    }
+    if (!elements.previewDrawer.hidden) {
+      setStatus(elements.status.textContent + ' / 確認して同期したあと、もう一度「取り込む」を押してください', '');
+      return false;
+    }
+    return true;
+  }
+
+  // (4) 済んでいない候補の Short を 1 本ずつ作り、plan.shorts に書き戻す。配置の対象 [{id, sequenceId}] を返す
+  // (4) Creates the missing Shorts one by one and writes plan.shorts back. Returns the placement targets [{id, sequenceId}].
+  async function createPlanShorts(plan, planPath, result, skips) {
+    setBusy(true);
+    const base = { dateTag: plan.date_tag, parentBin: 'Sequence', preSec: Number(plan.pre_sec), postSec: Number(plan.post_sec), includeHuman: true };
+    const probe = await callHost('ytsCreateShorts(' + hostLiteral(Object.assign({ dryRun: true, onlyIds: [] }, base)) + ')', true);
+    const idByName = new Map();
+    probe.sequenceNames.forEach(function (name, index) { idByName.set(name, (probe.sequenceIds || [])[index]); });
+    const pending = YTSImport.pendingCandidates(plan, probe.sequenceNames);
+    const shorts = Object.keys(pending.done).map(function (id) { return { id: id, sequenceId: idByName.get(pending.done[id]) }; });
+    plan.shorts = plan.shorts || {};
+    for (let i = 0; i < pending.toCreate.length; i += 1) {
+      setStatus('Short を作成中 (' + (i + 1) + '/' + pending.toCreate.length + ')', '');
+      try {
+        const out = await callHost('ytsCreateShorts(' + hostLiteral(Object.assign({ onlyIds: [pending.toCreate[i]] }, base)) + ')', true);
+        if (!out.created.length) skips.count(out.skipped ? '範囲が取れない候補' : 'マーカーが無い候補');
+        out.created.forEach(function (created) {
+          plan.shorts[created.id] = created.name;
+          shorts.push({ id: created.id, sequenceId: created.sequenceId });
+          result.shorts += 1;
+        });
+      } catch (error) {
+        skips.note(messageOf(error));
+      }
+    }
+    if (result.shorts) writePlan(planPath, plan);
+    return shorts;
+  }
+
+  // (5) 各 Short にチャット動画と字幕を置き、置けた（既にあった）ものを plan.placed に記録する
+  // (5) Places the chat video and captions on each Short and records placed (or already present) ones in plan.placed.
+  async function placePlanMedia(plan, planPath, shorts, result, skips) {
+    const kinds = [
+      { key: 'chat', label: 'チャット動画を配置中', missing: 'チャット動画なし', host: 'ytsPlaceChat', param: 'movPath', counter: 'chats' },
+      { key: 'caption', label: '字幕を配置中', missing: '字幕なし', host: 'ytsPlaceCaption', param: 'srtPath', counter: 'captions' }
+    ];
+    const candidateById = new Map((plan.candidates || []).map(function (candidate) { return [String(candidate.id), candidate]; }));
+    plan.placed = plan.placed || {};
+    let changed = false;
+    for (let k = 0; k < kinds.length; k += 1) {
+      const kind = kinds[k];
+      setBusy(true);
+      setStatus(kind.label, '');
+      for (let i = 0; i < shorts.length; i += 1) {
+        const id = shorts[i].id;
+        if (plan.placed[id] && plan.placed[id][kind.key] === true) continue;
+        const candidate = candidateById.get(id);
+        const file = candidate ? candidate[kind.key] : null;
+        if (!file || !pathExists(file)) { skips.count(kind.missing); continue; }
+        try {
+          const params = { sequenceId: shorts[i].sequenceId, dateTag: plan.date_tag };
+          params[kind.param] = file;
+          const out = await callHost(kind.host + '(' + hostLiteral(params) + ')', true);
+          if (out.placed || out.skipped === 'already') {
+            plan.placed[id] = Object.assign({}, plan.placed[id]);
+            plan.placed[id][kind.key] = true;
+            changed = true;
+          }
+          if (out.placed) result[kind.counter] += 1;
+          if (out.note) skips.note(out.note);
+        } catch (error) {
+          skips.note(messageOf(error));
+        }
+      }
+    }
+    if (changed) writePlan(planPath, plan);
+  }
+
+  // 「取り込む」: 計画を読み、(1)〜(5) を順に進め、(6) フル尺 Sequence に戻して件数を出す
+  // "取り込む": reads the plan, runs (1)-(5) in order, then (6) returns to the full-length sequence and shows the counts.
+  async function importStream() {
+    const planPath = elements.importPlan.value;
+    if (busy || !planPath) return;
+    let plan;
+    try {
+      plan = JSON.parse(readText(planPath));
+    } catch (error) {
+      setStatus('取り込み計画を読めません: ' + messageOf(error), 'error');
+      return;
+    }
+    closeImportPopover();
+    const result = { shorts: 0, chats: 0, captions: 0, skipped: [] };
+    const skips = createSkipList();
+    try {
+      const imported = await importPlanFootage(plan);
+      if (!(await syncPlanStream(plan, imported))) return;
+      const shorts = await createPlanShorts(plan, planPath, result, skips);
+      await placePlanMedia(plan, planPath, shorts, result, skips);
+      try {
+        await callHost('app.project.openSequence(' + hostLiteral(imported.sequenceId) + ') ? "OK|" : "ERR|"', false);
+      } catch (reopenError) {}
+      result.skipped = skips.list();
+      setStatus(YTSImport.summary(result), 'ok');
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function bindImportEvents() {
+    elements.importStreamBtn.addEventListener('click', function () {
+      if (elements.importPopover.hidden) openImportPopover();
+      else closeImportPopover();
+    });
+    elements.importRun.addEventListener('click', importStream);
+    elements.importClose.addEventListener('click', closeImportPopover);
+    elements.importPlan.addEventListener('change', updateControls);
+    elements.importRoot.addEventListener('change', saveFootageRoot);
+    // 入力中のキーを Premiere のショートカットに渡さない。Enter で確定、Escape で閉じる
+    // Keep typed keys away from Premiere shortcuts; Enter commits, Escape closes.
+    ['keydown', 'keyup', 'keypress'].forEach(function (eventName) {
+      elements.importRoot.addEventListener(eventName, function (event) {
+        event.stopPropagation();
+        if (eventName !== 'keydown' || event.isComposing || event.keyCode === 229) return;
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          elements.importRoot.blur();
+        } else if (event.key === 'Escape') {
+          closeImportPopover();
+        }
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !elements.importPopover.hidden) closeImportPopover();
+    });
+    document.addEventListener('click', function (event) {
+      if (!elements.importPopover.hidden && !elements.importPopover.contains(event.target) &&
+          !elements.importStreamBtn.contains(event.target)) closeImportPopover();
+    });
   }
 
   function bindServerEvents() {
@@ -2457,6 +2743,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.pickCsv.addEventListener('click', pickCsv);
     elements.mergeCsv.addEventListener('click', pickMergeCsv);
     if (serverReady) bindServerEvents();
+    if (serverReady && window.YTSImport) bindImportEvents();
     elements.exportFramesBtn.addEventListener('click', exportAllFrames);
     elements.shortsBtn.addEventListener('click', function () {
       const opening = elements.shortsPopover.hidden;

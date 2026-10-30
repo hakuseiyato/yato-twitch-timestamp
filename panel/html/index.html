@@ -66,6 +66,20 @@
           </div>
         </div>
       </div>
+      <div class="shorts-control">
+        <button id="importStreamBtn" class="small secondary icon-button" type="button" title="配信を取り込む（夜の処理の結果を Premiere に）" aria-label="配信を取り込む（夜の処理の結果を Premiere に）" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8"></path><path d="M4.5 6.5L8 10l3.5-3.5"></path><path d="M2.5 11v2.5h11V11"></path></svg>
+        </button>
+        <div id="importPopover" class="offset-popover shorts-popover" role="dialog" aria-label="配信を取り込む" hidden>
+          <div style="margin-bottom: 6px; font-weight: 600;">配信を取り込む</div>
+          <label class="server-field"><span>Footage の場所</span><input id="importRoot" type="text" autocomplete="off" spellcheck="false"></label>
+          <label class="server-field"><span>取り込み計画</span><select id="importPlan"></select></label>
+          <div class="server-buttons">
+            <button id="importRun" class="primary" type="button" disabled>取り込む</button>
+            <button id="importClose" class="secondary" type="button">閉じる</button>
+          </div>
+        </div>
+      </div>
       <button id="refreshBtn" class="small secondary icon-button" type="button" title="更新" aria-label="更新">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5V1.5L11.6 3A6 6 0 1 0 14 8"></path><path d="M13 1.5H9.5"></path></svg>
       </button>
@@ -105,6 +119,7 @@
   <script src="../js/libs/CSInterface.js"></script>
   <script src="../js/lib.js"></script>
   <script src="../js/server.js"></script>
+  <script src="../js/import.js"></script>
   <script src="../js/main.js"></script>
 </body>
 </html>

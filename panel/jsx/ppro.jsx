@@ -766,6 +766,7 @@ function ytsCreateShorts(p) {
     var created = [];
     var names = [];
     var sequenceNames = [];
+    var sequenceIds = [];
     var onlySet = null;
     var skipped = 0;
     var usedNames = {};
@@ -848,10 +849,11 @@ function ytsCreateShorts(p) {
         for (i = 0; i < allSequences.numSequences; i += 1) {
             usedNames["n_" + allSequences[i].name] = true;
             sequenceNames.push(String(allSequences[i].name));
+            sequenceIds.push(String(allSequences[i].sequenceID));
         }
 
-        // 既にその日の bin に Short があれば番号はその続きから。p.dryRun なら件数だけ返す（二重作成の確認用）
-        // Numbering continues after Shorts already in the day's bin. p.dryRun only reports the count (used to confirm before duplicating).
+        // 既にその日の bin に Short があれば番号はその続きから。p.dryRun なら件数だけ返す（二重作成の確認用）。sequenceNames / sequenceIds は同じ並び（取り込みの再実行で済んだ Short を探す）
+        // Numbering continues after Shorts already in the day's bin. p.dryRun only reports the count (used to confirm before duplicating). sequenceNames / sequenceIds share one order (the import rerun looks up finished Shorts).
         existing = 0;
         parentBin = parentBinName ? ytsFindBin(app.project.rootItem, parentBinName) : null;
         if (!parentBin) { parentBin = app.project.rootItem; binPath = binName; }
@@ -866,7 +868,7 @@ function ytsCreateShorts(p) {
                 } catch (childError) {}
             }
         }
-        if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length, sequenceNames: sequenceNames });
+        if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length, sequenceNames: sequenceNames, sequenceIds: sequenceIds });
 
         for (i = 0; i < targets.length; i += 1) {
             inSec = Math.max(0, targets[i].t - preSec);
