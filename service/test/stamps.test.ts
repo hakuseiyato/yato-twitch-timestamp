@@ -244,6 +244,23 @@ describe('POST /api/stamps', () => {
     expect(empty).toEqual({ accepted: [], rejected: [] });
   });
 
+  it('accepts source scout and stores it', async () => {
+    await seedTerano();
+    const streamId = '60031';
+    await seedStream({ stream_id: streamId, channel: CHANNEL, started_at: STARTED_AT });
+    const out = await post('mod1', [rec(streamId, { id: 'y0000a01', memo: '候補: 笑い | ハハハ', native: false })], { source: 'scout' });
+    expect(out.accepted).toEqual(['y0000a01']);
+    expect((await stampRow('y0000a01'))?.source).toBe('scout');
+  });
+
+  it('still rejects an unknown source', async () => {
+    await seedTerano();
+    const streamId = '60032';
+    await seedStream({ stream_id: streamId, channel: CHANNEL, started_at: STARTED_AT });
+    const res = await call('mod1', 'POST', '/api/stamps', { records: [rec(streamId)], source: 'bot' });
+    expect(res.status).toBe(400);
+  });
+
   it('cookie POST without X-Requested-With is 403 csrf; no credential is 401', async () => {
     const cookie = await seedSession('mod1');
     const csrf = await request('/api/stamps', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ records: [] }) });

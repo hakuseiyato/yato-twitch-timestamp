@@ -8,7 +8,7 @@ import { error, json, readJson } from './http';
 import type { Router } from './router';
 import { ensureStream, loadStream, STREAM_ID_PATTERN } from './streams';
 
-export type StampSource = 'extension' | 'web' | 'panel';
+export type StampSource = 'extension' | 'web' | 'panel' | 'scout';
 
 // 同期 CSV と同じ 13 列 / The same 13 columns as the sync CSV
 export interface StampRecord {
@@ -32,7 +32,7 @@ type Incoming = Omit<StampRecord, 'timecode'>;
 // 判定に要る既存行の列 / Columns of an existing row needed for the checks
 type Existing = Pick<StampRow, 'by' | 'updated_at'>;
 
-const SOURCES: readonly StampSource[] = ['extension', 'web', 'panel'];
+const SOURCES: readonly StampSource[] = ['extension', 'web', 'panel', 'scout'];
 // 1 要求の上限（D1 の呼び出し回数と CPU 10 ms を守る）/ Per-request cap (keeps D1 calls and the 10 ms CPU budget in bounds)
 export const MAX_RECORDS = 500;
 // D1 の 1 文あたりの bind 上限は 100（stream_id の 1 個を引いた分）/ D1 allows 100 bound parameters per statement (minus one for stream_id)
