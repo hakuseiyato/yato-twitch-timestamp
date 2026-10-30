@@ -25,7 +25,8 @@ def _run(tool: str, args: list[str]) -> None:
     """外部ツールを実行。見つからなければ日英のメッセージで RuntimeError。
     Run an external tool; RuntimeError with a bilingual message when it is missing."""
     try:
-        subprocess.run([tool, *args], check=True)
+        # 常駐（pythonw）から呼ばれても窓を出さない / no console window when run from the pythonw daemon
+        subprocess.run([tool, *args], check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except FileNotFoundError:
         raise RuntimeError(f'{tool} が見つかりません / {tool} not found') from None
 

@@ -14,8 +14,16 @@ if ($Uninstall) {
     exit 0
 }
 
-# The scheduler's PATH may differ from this shell, so bake the full python.exe path into the action.
-$python = (Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+# The scheduler's PATH may differ from this shell, so bake the full path into the action.
+# pythonw.exe: no console window at logon (closing one would stop the daemon).
+$cmd = Get-Command pythonw -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cmd) {
+    $python = $cmd.Source
+} else {
+    $console = (Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $python = Join-Path (Split-Path $console) 'pythonw.exe'
+}
+if (-not (Test-Path -LiteralPath $python)) { throw "pythonw.exe not found: $python" }
 $scoutDir = $PSScriptRoot
 $script = Join-Path $scoutDir 'night.py'
 if (-not (Test-Path -LiteralPath $script)) { throw "night.py not found: $script" }

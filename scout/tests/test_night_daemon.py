@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -112,12 +112,36 @@ class RequestTest(TickBase):
         self.assertEqual(night.tick(ctx, NOW), ['2914625472'])
         self.assertEqual(self.run_job.call_count, 1)
 
-    def test_running_row_adopted_only_on_first_tick(self):
+    def test_job_keeps_vod_and_last_terminal_status(self):
+        night.tick(self.loop_ctx([dict(REQUESTED)]), NOW)
+        job = self.state.jobs['2914625472']
+        self.assertEqual(job['vod'], VOD)
+        self.assertEqual(job['last_status'], DONE_TEXT)
+
+    def test_g_stuck_row_of_finished_job_gets_terminal_status_again(self):
+        job = self.state.job('2914625472')
+        job['steps'] = {s: 'done' for s in night.night_lib.STEP_ORDER}
+        job['last_status'] = DONE_TEXT
+        row = dict(REQUESTED, night_status='処理中: 計画')
+        self.assertEqual(night.tick(self.loop_ctx([row]), NOW), [])
+        self.run_job.assert_not_called()
+        bodies = self.patch_bodies()
+        self.assertEqual(len(bodies), 1)
+        self.assertEqual(bodies[0][0], '/api/streams/316644129905')
+        self.assertEqual(bodies[0][1]['night_status'], DONE_TEXT)
+        datetime.fromisoformat(bodies[0][1]['night_done_at'].replace('Z', '+00:00'))
+        # 作り直さない / the job is not reset
+        self.assertEqual(len(self.state.jobs['2914625472']['steps']), len(night.night_lib.STEP_ORDER))
+
+    def test_h_stuck_row_without_job_runs_on_every_tick(self):
         row = dict(REQUESTED, night_status='処理中: 候補')
         ctx = self.loop_ctx([row])
         self.assertEqual(night.tick(ctx, NOW), ['2914625472'])
-        self.assertEqual(night.tick(ctx, NOW), [])
         self.assertEqual(self.run_job.call_count, 1)
+        # 2 周目も放置された行として拾う（偽の行は処理中のまま）/ adopted again on the next tick (the fake row stays running)
+        self.state.jobs.clear()
+        self.assertEqual(night.tick(ctx, NOW + timedelta(minutes=1)), ['2914625472'])
+        self.assertEqual(self.run_job.call_count, 2)
 
     def test_done_job_is_reset_so_steps_run_again(self):
         job = self.state.job('2914625472')
@@ -152,6 +176,49 @@ class WatchTest(TickBase):
         night.tick(self.loop_ctx([]), NOW)
         self.assertEqual(self.state.data['last_live']['stream_id'], '999')
         self.run_job.assert_not_called()
+
+
+class RetryTest(TickBase):
+    def _failed_job(self, vod_id, stopped=False):
+        job = self.state.job(vod_id)
+        job['steps'] = {'vod': 'done'}
+        job['error'] = {'step': 'chat', 'reason': 'サーバー HTTP 0 network: down', 'count': 1}
+        job['stream_id'] = '316644129905'
+        job['vod'] = dict(VOD, id=vod_id)
+        if stopped:
+            job['stopped'] = True
+        return job
+
+    def test_e_failed_job_resumes_on_gql_tick_only(self):
+        self._failed_job('2914625472')
+        ctx = self.loop_ctx([dict(REQUESTED, night_requested_at=None)])
+        self.assertEqual(night.tick(ctx, NOW), ['2914625472'])
+        self.assertEqual(self.run_job.call_count, 1)
+        jctx = self.run_job.call_args.args[0]
+        self.assertIs(jctx.vod, VOD)  # GQL にある VOD はその辞書を使う / the snapshot's dict when listed
+        self.assertEqual(jctx.stream_row['stream_id'], '316644129905')
+        self.assertEqual(night.tick(ctx, NOW + timedelta(minutes=1)), [])
+        self.assertEqual(self.run_job.call_count, 1)
+
+    def test_e2_failed_job_outside_snapshot_uses_stored_vod(self):
+        self._failed_job('2900000000')
+        night.tick(self.loop_ctx([]), NOW)
+        self.assertEqual(self.run_job.call_args.args[0].vod['id'], '2900000000')
+
+    def test_f_stopped_job_is_never_rerun(self):
+        self._failed_job('2914625472', stopped=True)
+        ctx = self.loop_ctx([])
+        night.tick(ctx, NOW)
+        night.tick(ctx, NOW + timedelta(minutes=10))
+        self.run_job.assert_not_called()
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_force_needs_vod(self):
+        for mode in ('--daemon', '--tick'):
+            with mock.patch('sys.stderr'), self.assertRaises(SystemExit):
+                night.parse_args([mode, '--force'])
+        self.assertTrue(night.parse_args(['--vod', '2914625472', '--force']).force)
 
 
 class LockTest(unittest.TestCase):

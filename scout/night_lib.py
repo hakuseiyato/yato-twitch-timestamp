@@ -198,9 +198,10 @@ def pending_requests(rows: list[dict], adopt_running: bool = False) -> list[dict
 
     要求が完了より新しい（完了が無いも含む）ものを開いているとみなす。ミリ秒の有無が混ざるので時刻で比べる。
     A request is open when newer than the last done (or never done); compared as datetimes since milliseconds may differ.
-    adopt_running=True（常駐の起動直後）は、処理中のまま完了時刻の無い行も拾う（前の常駐が途中で落ちた）。
-    adopt_running=True (right after the daemon starts) also takes rows left running with no done time (the previous
-    daemon died mid-run).
+    adopt_running=True（常駐の毎周）は、処理中のまま完了時刻の無い行も拾う（常駐は 1 本ずつ処理するので、周の時点で
+    そうなっている行は、落ちた常駐か届かなかった PATCH の名残）。
+    adopt_running=True (every daemon tick) also takes rows left running with no done time (the daemon runs one job at a
+    time, so at tick time such a row is left over from a dead daemon or a lost PATCH).
     """
     pending = []
     for row in rows:

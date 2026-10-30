@@ -43,6 +43,7 @@ HERE = Path(__file__).resolve().parent
 NIGHT_DIR = Path(os.path.expandvars(r'%LOCALAPPDATA%\peakaboo\night'))
 LOCK_PATH = NIGHT_DIR / 'daemon.lock'
 TICK_SEC = 60
+_VOD_KEYS = ('id', 'title', 'lengthSeconds', 'createdAt', 'status')
 LIVE_HISTORY_MAX = 20
 MAX_FAILURES = 3
 _REASON_MAX = 200
@@ -497,12 +498,14 @@ def setup_logging() -> None:
     NIGHT_DIR.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(NIGHT_DIR / 'night.log', mode='a', encoding='utf-8')
     fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setFormatter(scout._MessageOnly())  # トレースバックはファイルにだけ / tracebacks go to the file only
     for logger in (log, scout.log):
         logger.setLevel(logging.INFO)
         logger.addHandler(fh)
-        logger.addHandler(sh)
+    if sys.stdout is not None:  # pythonw（タスク）には画面が無い / pythonw (the logon task) has no console
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(scout._MessageOnly())  # トレースバックはファイルにだけ / tracebacks go to the file only
+        for logger in (log, scout.log):
+            logger.addHandler(sh)
 
 
 def find_vod(login: str, vod_id: str) -> dict:
@@ -524,11 +527,7 @@ def find_vod(login: str, vod_id: str) -> dict:
 
 @dataclass
 class LoopContext:
-    """常駐が周をまたいで持つもの / What the daemon keeps across ticks.
-
-    adopt_running は最初の周だけ True（前の常駐が処理中に落ちた行を拾い直す）。
-    adopt_running is True only on the first tick (re-takes rows a dead daemon left running).
-    """
+    """常駐が周をまたいで持つもの / What the daemon keeps across ticks."""
     client: api.Client
     cfg: dict
     night_cfg: dict
@@ -537,7 +536,6 @@ class LoopContext:
     notify: Callable[[str], None]
     scout_config_path: Path = HERE / 'scout.config.json'
     last_poll: datetime | None = None
-    adopt_running: bool = True
 
 
 def _patch_row(client: api.Client, stream_id: str, body: dict) -> None:
@@ -577,12 +575,17 @@ def _start_job(ctx: LoopContext, vod: dict, row: dict | None) -> None:
     """job を作って保存し、行に「処理中: 開始」を書いて run_job を走らせる。scout.run が足したログハンドラは外す。
     Create and save the job, write '処理中: 開始' on the row, run run_job, then drop log handlers scout.run added."""
     vod_id = str(vod['id'])
-    ctx.state.job(vod_id)
+    # 失敗した job を GQL の 20 本の外でも再開できるよう VOD を残す / keep the VOD so a failed job resumes beyond GQL's 20
+    ctx.state.job(vod_id)['vod'] = {k: vod.get(k) for k in _VOD_KEYS}
     ctx.state.save()  # run_job が落ちても同じ VOD を自動で拾い直さない / never auto-retake the VOD if run_job dies
 
     def status(text: str) -> None:
+        job = ctx.state.job(vod_id)
+        if text.startswith(('完了', '失敗')):
+            # PATCH が届かず処理中のまま残った行へ、後の周で書き直す / re-sent later to a row left running
+            job['last_status'] = text
         # 自動着手で行が未定でも、チャットの段が決めた行に後から書く / auto runs write to the row step_chat resolves
-        _patch_status(ctx.client, row['stream_id'] if row else ctx.state.job(vod_id).get('stream_id'), text)
+        _patch_status(ctx.client, row['stream_id'] if row else job.get('stream_id'), text)
 
     if row:
         _patch_row(ctx.client, row['stream_id'], {'night_status': '処理中: 開始', 'night_done_at': None})
@@ -611,6 +614,15 @@ def _handle_request(ctx: LoopContext, row: dict, snapshot: Callable[[], dict]) -
     str | None
         走らせた vod_id。VOD が使えなければ None / The vod_id that ran, or None when the VOD cannot be used.
     """
+    if str(row.get('night_status') or '').startswith('処理中') and not row.get('night_done_at'):
+        # 処理中のまま残った行（常駐は 1 本ずつなので、周の時点では放置されたもの）
+        # A row left running (the daemon is single-threaded, so at tick time it is abandoned)
+        job = next((j for vid, j in ctx.state.jobs.items()
+                    if vid == str(row.get('vod_id') or '') or j.get('stream_id') == row['stream_id']), None)
+        if job and job.get('last_status') and (job.get('stopped') or night_lib.next_step(job) is None):
+            log.info('処理中のまま残った行 %s に最後の結果を書き直します', row['stream_id'])
+            _patch_status(ctx.client, row['stream_id'], job['last_status'])
+            return None
     vod, reason = _vod_for_row(row, snapshot()['videos'])
     if vod is None:
         _patch_status(ctx.client, row['stream_id'], night_lib.status_text_failed('plan', reason))
@@ -634,8 +646,7 @@ def tick(ctx: LoopContext, now: datetime) -> list[str]:
     """
     channel = ctx.night_cfg['channel']
     rows = ctx.client.get(f'/api/channels/{scout.seg(channel)}/streams')['streams']
-    requests = night_lib.pending_requests(rows, adopt_running=ctx.adopt_running)
-    ctx.adopt_running = False
+    requests = night_lib.pending_requests(rows, adopt_running=True)
     cached: dict = {}
 
     def snapshot() -> dict:
@@ -660,10 +671,27 @@ def tick(ctx: LoopContext, now: datetime) -> list[str]:
             log.info('配信終了を検知: VOD %s「%s」', vod_id, vod['title'])
             _start_job(ctx, vod, row)
             ran.append(str(vod_id))
+        _resume_failed(ctx, snap, rows, ran)
     if requests or polled:
         log.info('tick: 要求 %d 件・GQL %s・実行 %s', len(requests), '確認' if polled else '省略',
                  ', '.join(ran) if ran else 'なし')
     return ran
+
+
+def _resume_failed(ctx: LoopContext, snap: dict, rows: list[dict], ran: list[str]) -> None:
+    """失敗して止まっていない job を、済んだ段を飛ばして再開する（設計 §4.8）。3 回で止めるのは run_job。
+    Resume failed, not-stopped jobs, skipping finished steps (design §4.8); run_job stops them after three failures."""
+    for vod_id, job in list(ctx.state.jobs.items()):
+        if vod_id in ran or not job.get('error') or job.get('stopped'):
+            continue
+        vod = next((v for v in snap['videos'] if str(v['id']) == vod_id), None) or job.get('vod')
+        if not vod:
+            log.warning('job %s は VOD の情報が無いため再開できません', vod_id)
+            continue
+        row = next((r for r in rows if job.get('stream_id') and r.get('stream_id') == job['stream_id']), None)
+        log.info('失敗した job を再開: VOD %s（%s）', vod_id, job['error'].get('reason'))
+        _start_job(ctx, vod, row)
+        ran.append(vod_id)
 
 
 def main_loop(ctx: LoopContext) -> None:
@@ -748,6 +776,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = p.parse_args(argv)
     if args.vod is not None and not args.vod.isdigit():
         p.error('--vod は数字 / --vod must be numeric')
+    if args.force and args.vod is None:
+        p.error('--force は --vod と一緒に使います / --force needs --vod')
     return args
 
 
