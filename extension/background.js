@@ -148,8 +148,11 @@ async function uploadBatch(serverUrl, token, batch, summary) {
   const ids = batch.records.map(function (record) { return record.id; });
   let response;
   try {
+    // cookie は送らない（同じブラウザで Web にサインインしていると session 扱いになり CSRF 403 になる）
+    // Never send cookies: a web sign-in in the same browser would turn this into a session request (CSRF 403)
     response = await fetch(serverUrl + '/api/stamps', {
       method: 'POST',
+      credentials: 'omit',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ records: batch.records.map(TSLib.toUploadRecord), source: 'extension' })
     });

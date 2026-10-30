@@ -179,6 +179,7 @@ async function testStampUploadsToServer() {
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].init.method, 'POST');
   assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer tok');
+  assert.strictEqual(calls[0].init.credentials, 'omit'); // cookie を送らない / never send cookies
   assert.strictEqual(calls[0].init.headers['Content-Type'], 'application/json');
   const body = JSON.parse(calls[0].init.body);
   assert.strictEqual(body.source, 'extension');
