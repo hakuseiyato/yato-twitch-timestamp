@@ -181,7 +181,7 @@
       }
       // 消せる人（本人・owner・site_admin）にだけ × を出す / The × only for those who may delete (author, owner, site admin)
       if (TSLib.canDeleteStamp(me, stream.channel, s)) {
-        const remove = el('button', { type: 'button', class: 'x', 'aria-label': '削除', title: 'このスタンプを削除', text: '×' });
+        const remove = el('button', { type: 'button', class: 'x', 'aria-label': '削除: ' + tc(s.offset_sec), title: 'このスタンプを削除', text: '×' });
         // 送信中の行は組み直しても押せないまま / Rows whose deletion is in flight stay disabled across rebuilds
         if (deleting.has(s.id)) setBusy(remove, true);
         remove.addEventListener('click', function (event) {
@@ -238,10 +238,19 @@
         return;
       }
       const reason = ((result.rejected || [])[0] || {}).reason || 'unknown';
-      // サーバーは本人・owner 以外の墓標を forbidden_tombstone、会員でなければ forbidden_channel で返す
-      // The server answers forbidden_tombstone for a tombstone by neither author nor owner, forbidden_channel for a non-member
-      const forbidden = reason === 'forbidden_tombstone' || reason === 'forbidden_channel';
-      showError(forbidden ? '削除できるのは本人とチャンネルの owner だけです' : '削除できませんでした: ' + errorText({ error: reason }));
+      // サーバーは本人・owner・サイト管理者以外の墓標を forbidden_tombstone、会員でなければ forbidden_channel、
+      // 手元より新しい版があれば stale、元の行の時刻が先に進みすぎて墓標の時刻が範囲外なら invalid_time で返す。
+      // それ以外は errorText に任せる
+      // The server answers forbidden_tombstone for a tombstone by none of author, owner or site admin, forbidden_channel for a non-member,
+      // stale when a newer version exists, and invalid_time when the stored row's time runs so far ahead that the tombstone's is out of range.
+      // Anything else goes through errorText
+      const DELETE_TEXT = {
+        stale: 'ほかの場所で更新されています。再読み込みしてください',
+        invalid_time: 'ほかの場所で更新されています。再読み込みしてください',
+        forbidden_tombstone: '削除できるのは本人・チャンネルの owner・サイト管理者だけです',
+        forbidden_channel: 'このチャンネルの会員ではありません'
+      };
+      showError(DELETE_TEXT[reason] || '削除できませんでした: ' + errorText({ error: reason }));
     } catch (e) {
       showError('削除できませんでした: ' + messageOf(e));
     }

@@ -140,7 +140,7 @@ Where candidates appear:
 
 Creating Short sequences (Premiere Pro only):
 
-The button next to the frame-export button ("候補から Sequence を作る / Create Short sequences") opens a popover with "前 / Before (s)" (default 15), "後 / After (s)" (default 45), "人のマーカーも / Include human markers", and "作成 / Create". For every Peakaboo marker (one with a `[yts:…]` tag) that is a candidate, or every one when the check box is on, the panel sets the active sequence's In/Out to [marker − before, marker + after], creates a subsequence, names it `Short_NN_<memo without the prefix, up to 20 characters>` (made unique), removes the markers copied into it, and moves it to the `Peakaboo_Shorts` bin. The original In/Out points are restored afterwards, but only when the run changed them and both could be read; what happens when the sequence has no In/Out set is still to be confirmed in a real Premiere Pro. The before/after values are remembered between sessions. This has not been verified in a real Premiere Pro yet; 実機確認は Yato さんの手順書に従う.
+The button next to the frame-export button ("候補から Sequence を作る" (create Short sequences from candidates)) opens a popover with "マーカーの前（秒）" (seconds before the marker, default 15), "マーカーの後（秒）" (seconds after the marker, default 45), "人のマーカーも含める" (include human markers), and "作成" (create). For every Peakaboo marker (one with a `[yts:…]` tag) that is a candidate, or every one when the check box is on, the panel sets the active sequence's In/Out to [marker − before, marker + after], creates a subsequence, names it `Short_NN_<memo without the prefix, up to 20 characters>` (made unique), removes the markers copied into it, and moves it to the `Peakaboo_Shorts` bin. The original In/Out points are restored afterwards, but only when the run changed them and both could be read; what happens when the sequence has no In/Out set is still to be confirmed in a real Premiere Pro. The before/after values are remembered between sessions. This has not been verified in a real Premiere Pro yet; 実機確認は Yato さんの手順書に従う.
 
 Tuning:
 
@@ -215,17 +215,17 @@ After "CSV" (and after a DualPlayer conversion) the panel links the open sequenc
 Instead of a shared CSV file, the panel can use a stream stored in the cloud service (`service/`) as its sync source.
 
 1. Sign in on the service, open `/me`, and issue a panel token (`ytt_…`). It is shown only once.
-2. In the panel, click "サーバー", enter the server URL (for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`; only `https://host` or `https://host:port`) and the token, and click "接続 / Connect". The settings are saved only after the server accepts them; afterwards "サーバー" connects right away.
-3. Choose the channel and the stream (`YYYY-MM-DD HH:mm · title · スタンプ n`) and click "この配信を開く / Open this stream".
+2. In the panel, click "サーバー", enter the server URL (for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`; only `https://host` or `https://host:port`) and the token, and click "接続" (connect). The settings are saved only after the server accepts them; afterwards "サーバー" connects right away.
+3. Choose the channel and the stream (`YYYY-MM-DD HH:mm · title · スタンプ n`) and click "この配信を開く" (open this stream).
 4. The panel copies the stream's stamps into a mirror CSV and opens it like any sync file. As with "CSV" (see "Fewer clicks"), it links the open sequence/comp if it is not linked yet and syncs; the first sync stops at the confirm drawer, so the usual flow is "この配信を開く" → "この内容で同期". After that, "紐付け" and "同期" work as for a CSV file.
 
 The mirror CSV is `%APPDATA%\yato-twitch-timestamp\server\<host>\<stream_id>_sync.csv` (the panel's CEP `USER_DATA` folder; characters other than letters, digits, `_`, `-` and `.` in the host and the stream id become `_`, so `host:8443` becomes `host_8443`). Next to it are `<stream_id>.server.json` (server URL, stream, your login, and the last pull and push times) and the usual `<stream_id>_sync.yts-sync.json` sidecar. The panel manages these files; do not edit them.
 
 What "同期" does with a server stream:
 
-- **Pull first.** It fetches all of the stream's stamps (tombstones included) and merges them into the mirror CSV by `id` (the later `updated_at` wins), then calculates the differences as usual. The log shows "サーバーから n 件取り込み / pulled n". If the server cannot be reached or refuses (401, 403, network), the sync stops with "サーバーから取り込めないため同期を中止しました / Sync stopped: could not pull from the server: …", because syncing with stale local data would misjudge conflicts.
-- **Push after.** Once the sync has written the mirror CSV, the records changed since the last push are sent with `POST /api/stamps` (`source: 'panel'`, 500 per request): "サーバーへ n 件送信 / pushed n". Records exactly as the server returned them on the pull are not sent back. The last-push time is the moment the push started, so an edit made during a push is sent next time. If a request fails (network, 5xx, 401, …), the last-push time does not move: "サーバーへの送信は次回に再試行 / push will retry: …", and the next "同期" sends everything changed since the previous successful push. The markers and the mirror CSV are already synchronized at that point.
-- **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason> / failed n" with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません / cannot delete others' records"), you deleted a marker recorded by someone else; only its author (or, on the web, a channel owner or a site admin) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
+- **Pull first.** It fetches all of the stream's stamps (tombstones included) and merges them into the mirror CSV by `id` (the later `updated_at` wins), then calculates the differences as usual. The log shows "サーバーから n 件取り込み" (pulled n). If the server cannot be reached or refuses (401, 403, network), the sync stops with "サーバーから取り込めないため同期を中止しました: …" (sync stopped: could not pull from the server), because syncing with stale local data would misjudge conflicts.
+- **Push after.** Once the sync has written the mirror CSV, the records changed since the last push are sent with `POST /api/stamps` (`source: 'panel'`, 500 per request): "サーバーへ n 件送信" (pushed n). Records exactly as the server returned them on the pull are not sent back. The last-push time is the moment the push started, so an edit made during a push is sent next time. If a request fails (network, 5xx, 401, …), the last-push time does not move: "サーバーへの送信は次回に再試行: …" (push will retry), and the next "同期" sends everything changed since the previous successful push. The markers and the mirror CSV are already synchronized at that point.
+- **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason>" (failed n) with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません" (cannot delete others' records)), you deleted a marker recorded by someone else; only its author (or, on the web, a channel owner or a site admin) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
 - **Recorder.** Records created by the panel ("＋追加", and markers picked up by "同期") get your Twitch login from `/api/me` as `by` instead of `premiere` / `ae`.
 
 Limits:
@@ -236,9 +236,9 @@ Limits:
 
 Errors:
 
-- "トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me" (401): the token was revoked or mistyped. Issue a new one on `/me`, enter it under "サーバー", and click "接続 / Connect".
-- "このチャンネルの会員ではありません / Not a member of this channel" (403): ask a channel owner to add your Twitch login in `/admin`.
-- "この鏡 CSV は別のサーバー（…）のものです。「サーバー」で接続し直してください / This mirror CSV belongs to another server": the saved server URL changed after the mirror was made. Connect to that server again, or open the stream from the new server (it gets its own mirror folder).
+- "トークンが無効です。Web の /me で発行し直してください" (token invalid; issue a new one on /me) (401): the token was revoked or mistyped. Issue a new one on `/me`, enter it under "サーバー", and click "接続" (connect).
+- "このチャンネルの会員ではありません" (not a member of this channel) (403): ask a channel owner to add your Twitch login in `/admin`.
+- "この鏡 CSV は別のサーバー（…）のものです。「サーバー」で接続し直してください" (this mirror CSV belongs to another server): the saved server URL changed after the mirror was made. Connect to that server again, or open the stream from the new server (it gets its own mirror folder).
 
 ### Exporting marker frames
 
@@ -311,7 +311,7 @@ The pure library has no dependencies. Run:
 node tests/test_lib.js
 ```
 
-`node tests/test_background.js` runs `extension/background.js` on a fake `chrome` and `fetch` (stamping, the upload queue, retries, and server responses), and `node tests/test_popup_markup.js` checks that the popup markup and script stay in step.
+`node tests/test_background.js` runs `extension/background.js` on a fake `chrome` and `fetch` (stamping, the upload queue, retries, and server responses), and `node tests/test_popup_markup.js` checks that the popup markup and script stay in step. `node tests/test_web_tokens.js` checks the web colour tokens in `service/web/css/app.css` against the contrast floor in both themes (see [`design.md`](design.md)).
 
 The library tests cover Twitch URL parsing, offset and timecode calculations, clock-skew correction, CSV round trips, ID-based record merging, grouping, and the three-way sync planner. Tests do not modify the sample by default. To regenerate `samples/sample.csv` through `TSLib.toCsv`, run:
 

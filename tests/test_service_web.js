@@ -82,7 +82,7 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
 // グラフの縦線: candidate が真のスタンプは --cand、それ以外は --warn。棒はグラデーション、線の上端に半径 4 の丸（canvas は最小の偽物）
 // Graph stamp lines: stamps with a truthy candidate use --cand, others --warn. Bars are gradients, each line has a radius-4 dot on top (minimal fake canvas)
 (function () {
-  const css = { '--warn': '#e0b050', '--cand': '#c792ea', '--bar-top': '#6f8fb8', '--bar-bot': '#3b4d66' };
+  const css = { '--warn': '#e0b050', '--cand': '#c792ea', '--bar-top': '#111111', '--bar-bot': '#222222' };
   const calls = [];
   const arcs = [];
   const gradients = [];
@@ -113,9 +113,10 @@ assert.strictEqual(Graph.labelStep(15, 0.01), 7200);
     // 縦線は y = 0・幅 2 の単色で描く（棒はグラデーションのオブジェクトなので除く）/ Stamp lines are solid, at y = 0 with width 2 (bars are gradient objects, so excluded)
     const lines = calls.filter(c => c.y === 0 && c.w === 2 && typeof c.fill === 'string').map(c => c.fill);
     assert.deepStrictEqual(lines, ['#e0b050', '#c792ea']);
-    // 棒は上 --bar-top・下 --bar-bot のグラデーション / Bars are --bar-top to --bar-bot gradients
+    // 棒は上 --bar-top・下 --bar-bot のグラデーション。偽の値は graph.js の既定値と違えて、トークン名の誤りで落ちるようにする
+    // Bars are --bar-top to --bar-bot gradients. The fake values differ from graph.js's fallbacks so a wrong token name fails
     assert.ok(calls.some(c => typeof c.fill === 'object' && c.fill.stops.length));
-    assert.deepStrictEqual(gradients[0].stops, [[0, '#6f8fb8'], [1, '#3b4d66']]);
+    assert.deepStrictEqual(gradients[0].stops, [[0, '#111111'], [1, '#222222']]);
     // 線ごとに上端の丸（半径 4、線と同じ色）/ One dot per line at the top (radius 4, the line colour)
     assert.deepStrictEqual(arcs.map(a => [a.r, a.fill]), [[4, '#e0b050'], [4, '#c792ea']]);
     // 読み上げは日本語だけ / Screen-reader text is Japanese only

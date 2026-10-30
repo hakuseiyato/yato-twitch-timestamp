@@ -93,11 +93,11 @@
 | 配信ページ | `.meta` `.gwrap` `.graph` `.selrow` `.lists` `.tabs` | `.lists` は 1100px 以上で 3:2 の横並び（`.tabs` は隠れ、両パネルが見える。パネルは `role="tabpanel"` を外す）、未満は 1 列 + タブ（選んでいないパネルの列は見出しごと畳む）。切り替えは stream.js の `syncLayout()` |
 | アイコン | `svg.i` | 線画 1 系統、線幅 1.75、14px。絵文字は使わない |
 
-JS が付けるクラス名（`in-bin` `flash` `is-new` `cand` `candidate` `human` `invalid` `untitled` `on`、状態行の `ok` / `error`、タブの `aria-selected`）は契約なので名前を変えない。
+JS が付けるクラス名（`in-bin` `flash` `is-new` `cand` `candidate` `human` `invalid` `untitled` `on`、状態行の `ok` / `error`、タブの `aria-selected`）は契約なので名前を変えない。`candidate` は互換のために stream.js が `cand` と並べて付けている（今は app.css も JS も読まない）。
 
 ## CTA voice
 
-- `.btn.pri` は 1 ページに 1 つ: 「Twitch でサインイン」「ここに印」「発行」「取り込む」
+- `.btn.pri` は 1 ページに 1 つ: 「Twitch でサインイン」「ここに印」「発行」「この VOD で取り込む」（配信ページのメタ行の「取り込む」は文字だけのボタン `.link-btn`）
 - それ以外は既定の `.btn`、目立たせない操作は `.btn.ghost`、削除・失効は `.btn.danger`
 
 ## 文言の規則
@@ -117,3 +117,4 @@ JS が付けるクラス名（`in-bin` `flash` `is-new` `cand` `candidate` `huma
 
 - 2026-10-30 初版（設計書 §4 から転記。コントラスト基準に合わせて `--ink-2`（明）`--ink-3` `--accent`（明）`--accent-fill` `--ok`（明）`--warn`（明）`--bar-top`（明）`--bar-hover`（明）`--focus`（明）を調整）
 - 2026-10-30 仕上げ: 旧クラス（`.card` `.row-list` `.stream-row` `.stream-grid` `.site-nav` ほか）と旧トークンのエイリアスを削除。部品表に `.streams` `.members` スタンプの削除を足し、`.lists` / `.tabs` の切り替えを明記。`.btn.danger` の hover は枠を赤くしない
+- 2026-10-30 最終レビュー: CTA の表を「この VOD で取り込む」に直し、`candidate` が互換用であることを明記

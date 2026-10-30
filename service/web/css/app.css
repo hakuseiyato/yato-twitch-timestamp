@@ -149,11 +149,11 @@ button, .btn {
   text-decoration: none;
   transition: background-color var(--ease), color var(--ease), border-color var(--ease);
 }
-button:hover:not(:disabled), .btn:hover { background: var(--paper-4); text-decoration: none; }
+button:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--paper-4); text-decoration: none; }
 /* 主ボタン（1 ページに 1 つ）。hover は暗くして白字のコントラストを保つ
    Primary button (one per page); hover darkens so the white label keeps its contrast */
 .btn.pri { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); box-shadow: var(--shadow-edge), var(--shine); }
-.btn.pri:hover { background: var(--accent-fill); filter: brightness(0.92); }
+.btn.pri:hover:not(:disabled) { background: var(--accent-fill); filter: brightness(0.92); }
 .btn.ghost { border-color: transparent; background: none; color: var(--ink-2); box-shadow: none; }
 /* 削除の ghost は除く（無効のときも --err のまま）/ Danger ghosts are excluded (they keep --err even when disabled) */
 .btn.ghost:not(.danger):hover { background: var(--paper-3); color: var(--ink); }
@@ -189,7 +189,7 @@ input.invalid, .in.invalid { border-color: var(--err); }
 input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-fill); }
 
 /* ---- ヘッダー（52px）/ Header (52px) ---- */
-.hdr, .site-header {
+.hdr {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -211,7 +211,9 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 .who { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
 .who .av { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--av-grad); color: var(--on-brand); font-size: 11px; font-weight: 600; }
 .who button { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--ink-2); font-weight: 400; }
-.who button:hover:not(:disabled) { background: none; color: var(--ink); }
+/* サインアウトは .btn.ghost でも箱の hover にしない（ghost の hover より詳細度を上げる）
+   Sign-out is a .btn.ghost but gets no boxed hover (more specific than the ghost hover) */
+.who button:hover:not(:disabled), .who .btn.ghost:not(.danger):hover { background: none; color: var(--ink); }
 
 /* ---- 本文の型 / Page types ---- */
 main {
@@ -459,7 +461,7 @@ main.doc .sec .field-error:empty { min-height: 0; }
 /* ---- 狭い画面 / Narrow screens ---- */
 @media (max-width: 640px) {
   main { padding: 16px 16px 24px; }
-  .hdr, .site-header { padding: 0 16px; }
+  .hdr { padding: 0 16px; }
   .graph { height: 140px; }
   ul.rows li { grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; }
   ul.rows.st li { grid-template-columns: 64px minmax(0, 1fr); }
@@ -475,6 +477,9 @@ main.doc .sec .field-error:empty { min-height: 0; }
 /* ---- タッチ操作では 44px / 44px controls for touch ---- */
 @media (pointer: coarse) {
   :root { --control-h: 44px; }
+  /* 枠なしのインライン値と「候補を先に」も 44px の高さにする（マウスでは低いまま）
+     Borderless inline values and the "候補を先に" label get the 44px height too (they stay short with a mouse) */
+  select.inline, input.inline, .sec-h .r > label { min-height: var(--control-h); }
   /* 見た目を変えずに当たり判定だけ 44px に広げる / Widen only the hit area to 44px, keeping the look */
   .who button, ul.rows .x, .link-btn { position: relative; }
   .who button::after, ul.rows .x::after, .link-btn::after {
