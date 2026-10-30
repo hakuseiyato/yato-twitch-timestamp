@@ -33,6 +33,7 @@
   let graph = null;
   let vodCandidates = [];
   let importAbort = null;
+  const deleting = new Set(); // 削除を送っている最中のスタンプ id / Ids of stamps whose deletion is in flight
 
   // ---- 共通 / Shared ----
 
@@ -183,6 +184,8 @@
       // 消せる人（本人・owner・site_admin）にだけ × を出す / The × only for those who may delete (author, owner, site admin)
       if (TSLib.canDeleteStamp(me, stream.channel, s)) {
         const remove = el('button', { type: 'button', class: 'x', 'aria-label': '削除', title: 'このスタンプを削除', text: '×' });
+        // 送信中の行は組み直しても押せないまま / Rows whose deletion is in flight stay disabled across rebuilds
+        if (deleting.has(s.id)) setBusy(remove, true);
         remove.addEventListener('click', function (event) {
           // 行のクリック（将来のシーク）に伝えない / Keep the click from reaching the row (future seek)
           event.stopPropagation();
@@ -214,26 +217,63 @@
   // Sends a tombstone (deleted: true with a newer updated_at); once accepted, drops the stamp from the list and graph
   async function deleteStamp(s, button) {
     showError('');
-    const tomb = TSLib.tombstoneRecord(s, new Date().toISOString());
-    // 成功時は行ごと組み直されるので、ボタンを戻すのは失敗時だけ / On success the row is rebuilt, so the button is restored only on failure
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
+    // updated_at は今と「元の updated_at + 1 ms」の遅い方。時計が進んだ端末が書いた行でも stale で弾かれない
+    // updated_at is the later of now and the stored updated_at + 1 ms, so a row written by a faster clock is not rejected as stale
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(s.updated_at) + 1 || 0)).toISOString();
+    const tomb = TSLib.tombstoneRecord(s, updatedAt);
+    deleting.add(s.id);
+    setBusy(button, true);
     try {
       const result = await api('/api/stamps', { method: 'POST', body: { records: [tomb], source: 'web' } });
       if ((result.accepted || []).includes(s.id)) {
+        // 見えている並び（「候補を先に」を含む）で前後の行を控えてから外す / Note the neighbours in display order (incl. "candidates first") before removing
+        const order = Array.from($('stamp-list').children).map(function (li) { return stamps[stampItems.indexOf(li)]; });
+        const at = order.indexOf(s);
+        const neighbours = order.slice(at + 1).concat(order.slice(0, Math.max(at, 0)).reverse());
+        deleting.delete(s.id);
         stamps = stamps.filter(function (x) { return x !== s; });
         renderStamps();
         redraw();
         setStatus($('page-status'), 'スタンプを削除しました', 'ok');
+        // ボタンが消えてフォーカスが body に落ちたときだけ移す / Move focus only when it fell to <body> with the removed button
+        if (!document.activeElement || document.activeElement === document.body) focusNearestX(neighbours);
         return;
       }
       const reason = ((result.rejected || [])[0] || {}).reason || 'unknown';
-      showError(reason === 'forbidden' ? '削除できるのは本人とチャンネルの owner だけです' : '削除できませんでした: ' + errorText({ error: reason }));
+      // サーバーは本人・owner 以外の墓標を forbidden_tombstone、会員でなければ forbidden_channel で返す
+      // The server answers forbidden_tombstone for a tombstone by neither author nor owner, forbidden_channel for a non-member
+      const forbidden = reason === 'forbidden_tombstone' || reason === 'forbidden_channel';
+      showError(forbidden ? '削除できるのは本人とチャンネルの owner だけです' : '削除できませんでした: ' + errorText({ error: reason }));
     } catch (e) {
       showError('削除できませんでした: ' + messageOf(e));
     }
-    button.disabled = false;
-    button.removeAttribute('aria-busy');
+    // 失敗: 送信中から外し、今の × を戻す（待つ間に組み直されていれば新しいボタン）
+    // Failure: leave the in-flight set and restore the current × (a new button if the list was rebuilt meanwhile)
+    deleting.delete(s.id);
+    const row = stampItems[stamps.indexOf(s)];
+    const current = row ? row.querySelector('button.x') : null;
+    if (current) setBusy(current, false);
+  }
+
+  function setBusy(button, on) {
+    button.disabled = on;
+    if (on) button.setAttribute('aria-busy', 'true');
+    else button.removeAttribute('aria-busy');
+  }
+
+  // 削除の後のフォーカス: 次の行の ×（無ければ前の行）、どれも無ければタブ「スタンプ」か一覧
+  // Focus after a delete: the next row's × (else the previous one); if none, the "スタンプ" tab or the list itself
+  function focusNearestX(neighbours) {
+    for (const n of neighbours) {
+      const row = stampItems[stamps.indexOf(n)];
+      const x = row ? row.querySelector('button.x') : null;
+      if (x && !x.disabled) { x.focus(); return; }
+    }
+    const tab = $('tab-stamps');
+    if (tab.offsetParent !== null) { tab.focus(); return; }
+    const panel = $('panel-stamps');
+    panel.tabIndex = -1;
+    panel.focus();
   }
 
   // ---- グラフ / Graph ----
