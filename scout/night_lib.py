@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import PureWindowsPath
 
 try:
     from zoneinfo import ZoneInfo
@@ -73,8 +74,12 @@ def should_start(state: dict, snapshot: dict, now: datetime) -> str | None:
     Return the vod_id to start: the newest recorded VOD after the live has ended that has no job yet.
 
     条件 / Conditions: last_live.seen_at が now の 24 時間以内、snapshot['stream'] が None、
-    status == 'RECORDED' かつ createdAt >= seen_at − 6 時間。
-    last_live.seen_at within 24 h of now, no live stream, status RECORDED and createdAt >= seen_at − 6 h.
+    status == 'RECORDED' かつ createdAt >= その配信を最初に見た時刻 − 6 時間（履歴に無ければ seen_at − 6 時間）。
+    last_live.seen_at within 24 h of now, no live stream, status RECORDED and createdAt >= the stream's first
+    sighting − 6 h (seen_at − 6 h when the history lacks it).
+
+    最後に見た時刻を基準にすると 6 時間を超える配信の VOD が範囲から外れるので、最初に見た時刻を使う。
+    Measured from the first sighting, since from the last one a stream longer than 6 h would fall outside the range.
     """
     last_live = state.get('last_live')
     if not last_live or snapshot.get('stream') is not None:
@@ -83,7 +88,9 @@ def should_start(state: dict, snapshot: dict, now: datetime) -> str | None:
     if seen_at < now - _LIVE_RECENT:
         return None
     jobs = state.get('jobs') or {}
-    earliest = seen_at - _VOD_SLACK
+    first = next((e['seen_at'] for e in state.get('live_history') or [] if e.get('stream_id') == last_live['stream_id']),
+                 None)
+    earliest = (_parse_iso(first) if first else seen_at) - _VOD_SLACK
     recorded = [v for v in snapshot.get('videos') or []
                 if v.get('status') == 'RECORDED' and _parse_iso(v['createdAt']) >= earliest]
     recorded.sort(key=lambda v: _parse_iso(v['createdAt']), reverse=True)
@@ -122,6 +129,42 @@ def match_stream_row(rows: list[dict], live_history: list[dict], vod_created_at:
         if stream_id in by_id:
             return by_id[stream_id]
     return None
+
+
+def nearest_stream_row(rows: list[dict], vod_created_at: str, window_sec: float = 3600,
+                       vod_id: str | None = None) -> dict | None:
+    """started_at が VOD の createdAt に最も近く window_sec 以内の配信行。vod_id の無い行（vod_id を渡せば同じ行も）だけ。
+    The stream row whose started_at is closest to the VOD's createdAt within window_sec; only rows without a vod_id
+    (or with the given vod_id).
+
+    見張りが live を見損ねた（履歴に無い）ときに vod-<id> の行を別に作らないための最後の照合。時刻の壊れた行は飛ばす。
+    The last match before registering a separate vod-<id> row when the watcher missed the live; rows with a broken
+    time are skipped.
+    """
+    created = _parse_iso(vod_created_at)
+    best: tuple[timedelta, dict] | None = None
+    for row in rows:
+        row_vod = str(row.get('vod_id') or '')
+        if row_vod and row_vod != str(vod_id or ''):
+            continue
+        try:
+            gap = abs(_parse_iso(str(row.get('started_at') or '')) - created)
+        except ValueError:
+            continue
+        if gap <= timedelta(seconds=window_sec) and (best is None or gap < best[0]):
+            best = (gap, row)
+    return best[1] if best else None
+
+
+def sequence_name(footage: str) -> str:
+    """フル尺 Sequence の名前: 素材の basename（拡張子なし）から末尾の _vod を落としたもの。
+    The full-length sequence name: the footage basename without extension, minus a trailing _vod.
+
+    素材名は job ごとに _2, _3… で重ならないので、同じ日に 2 本あっても Sequence 名がぶつからない。
+    Footage names never collide across jobs (_2, _3…), so two streams on one day get distinct sequence names.
+    """
+    stem = PureWindowsPath(footage).stem
+    return stem[:-len('_vod')] if stem.endswith('_vod') else stem
 
 
 def _srt_time(sec: float) -> str:
@@ -174,6 +217,7 @@ def build_plan(*, date_tag: str, stream_id: str, vod_id: str, title: str, footag
         'title': title,
         'footage': footage,
         'footage_existing': footage_existing,
+        'sequence_name': sequence_name(footage),
         'pre_sec': pre_sec,
         'post_sec': post_sec,
         'candidates': candidates,
@@ -210,7 +254,14 @@ def pending_requests(rows: list[dict], adopt_running: bool = False) -> list[dict
             continue
         requested = row.get('night_requested_at')
         done = row.get('night_done_at')
-        if not requested or (done and _parse_iso(requested) <= _parse_iso(done)):
+        if not requested:
+            continue
+        try:
+            requested_at = _parse_iso(requested)  # 完了が無くても読む / parsed even without a done time
+            closed = bool(done) and requested_at <= _parse_iso(done)
+        except ValueError:  # 壊れた 1 行で周ごと落とさない / one broken row must not fail the whole tick
+            continue
+        if closed:
             continue
         if str(row.get('night_status') or '').startswith('処理中'):
             continue

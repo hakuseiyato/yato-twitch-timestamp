@@ -225,6 +225,17 @@ class StepChatTest(Base):
             'title': VOD['title'], 'vod_id': VOD['id']})
         self.assertEqual(job['stream_id'], 'vod-2914625472')
 
+    def test_late_watcher_uses_nearest_row_instead_of_registering(self):
+        # 見張りが live を見損ねても、開始が VOD に近い vod_id 無しの行を使い、vod-<id> を作らない
+        # When the watcher missed the live, the vod_id-less row starting near the VOD is used and no vod-<id> is made
+        row = {k: v for k, v in ROW.items() if k != 'vod_id'}
+        client = self._client(row)
+        job = self.state.job(VOD['id'])
+        with mock.patch.object(night.td, 'ensure_installed'), \
+                mock.patch.object(night.td, 'chatdownload', side_effect=self._fake_download):
+            night.step_chat(self.ctx(client), job)
+        client.post.assert_not_called()
+        self.assertEqual(job['stream_id'], '316644129905')
 
     def test_offset_note_only_when_unset(self):
         # 人が設定済み（5 秒）なら差が大きくても書かない / no note when a person already set the offset
@@ -332,6 +343,7 @@ class StepPlanTest(Base):
         self.assertEqual(text, (day / 'peakaboo_2914625472.json').read_text(encoding='utf-8'))
         plan = json.loads(text)
         self.assertEqual(plan['stream_id'], '316644129905')
+        self.assertEqual(plan['sequence_name'], '261030_x')
         self.assertEqual([c['id'] for c in plan['candidates']], ['y0000001', 'y0000003'])
         self.assertEqual(plan['candidates'][0]['chat'], str(day / 'chat' / '261030_chat_y0000001.mov'))
         self.assertIsNone(plan['candidates'][0]['caption'])
@@ -388,6 +400,31 @@ class StepVodTest(Base):
             night.step_vod(self.ctx(), job)
         run.assert_not_called()
         self.assertEqual(job['footage'], str(final))
+
+    def test_only_own_temp_files_are_removed_and_resume_data_kept(self):
+        day = self.footage / '_261030'
+        day.mkdir(parents=True)
+        stem = '261030_VALORANTやる'
+        human = day / f'{stem}.part2.mp4'                  # 人のファイル / a human file
+        human.write_bytes(b'human')
+        resume = [day / f'{stem}.part.mp4.part', day / f'{stem}.part.mp4.ytdl', day / f'{stem}.part.f137.mp4.part']
+        for p in resume:
+            p.write_bytes(b'resume')
+
+        def fake_run(cmd):
+            # yt-dlp が途中から続けられるよう、再試行の前には消さない / kept before the retry so yt-dlp can resume
+            for p in resume:
+                self.assertTrue(p.exists(), p.name)
+            Path(cmd[cmd.index('-o') + 1]).write_bytes(b'vod')
+
+        job = self.state.job(VOD['id'])
+        with mock.patch.object(night, '_run_logged', side_effect=fake_run):
+            night.step_vod(self.ctx(), job)
+        self.assertEqual((day / f'{stem}.mp4').read_bytes(), b'vod')
+        self.assertEqual(human.read_bytes(), b'human')
+        # 置き換えが済んだら続きのデータは消す / the resume data goes once the replace succeeded
+        for p in resume:
+            self.assertFalse(p.exists(), p.name)
 
 
 class NotifyTest(unittest.TestCase):

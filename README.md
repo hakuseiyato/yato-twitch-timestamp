@@ -187,15 +187,15 @@ What runs at night:
 | `scout` | 候補 | Runs Scout on the downloaded mp4 with `--yes --source` (no audio re-download, no prompt). Its normal rules apply, including the `cap_total` limit and the ±30 s exclusion around existing stamps. |
 | `render` | チャット動画 | For every live stamp of the stream (candidates and human stamps), renders the chat of [t − 15 s, t + 45 s] with TwitchDownloaderCLI `chatrender` as a transparent 400×1080 QuickTime file (qtrle, argb) to `_YYMMDD\chat\YYMMDD_chat_<stampId>.mov`. Stamps outside the VOD are skipped. |
 | `captions` | 字幕 | Writes the Whisper transcript of the same window as `_YYMMDD\captions\YYMMDD_caption_<stampId>.srt` (UTF-8 with BOM, CRLF, 20 characters per line, times relative to the Short's start). An empty window writes no file. |
-| `plan` | 計画 | Writes `_YYMMDD\peakaboo_<vodId>.json` and `_YYMMDD\peakaboo.json` (same content: date tag, stream and VOD ids, title, footage path, `pre_sec` / `post_sec`, and one entry per stamp with its chat video and caption paths or `null`) and shows a Windows toast "Peakaboo: 完了（候補 N・チャット動画 N・字幕 N）". |
+| `plan` | 計画 | Writes `_YYMMDD\peakaboo_<vodId>.json` and `_YYMMDD\peakaboo.json` (same content: date tag, stream and VOD ids, title, footage path, the full-length sequence name `sequence_name` (the footage name without `.mp4` and without a trailing `_vod`), `pre_sec` / `post_sec`, and one entry per stamp with its chat video and caption paths or `null`) and shows a Windows toast "Peakaboo: 完了（候補 N・チャット動画 N・字幕 N）". |
 
 - Downloads go to a `.part` name first and are renamed when complete, so a half-written file never has its final name.
-- A failed step is retried on the next GraphQL check (every 10 minutes), resuming from that step. After three failures of the same step the job stops and a toast "Peakaboo: 失敗: <段> — <理由>" appears; a "いま実行" request or `--vod … --force` starts it again.
+- A failed step is retried on the next GraphQL check (every 10 minutes), resuming from that step. After three failures of the same step the job stops and a toast "Peakaboo: 失敗: <段> — <理由>" appears; a "いま実行" request starts it again. To use `--vod … --force` instead, stop the daemon first with `Stop-ScheduledTask 'Peakaboo Night'`: on the configured `footage_root` the command shares `state.json` with the daemon and refuses to run while the daemon is running ("常駐が動いています（PID N）…", exit code `2`). Start the task again afterwards with `Start-ScheduledTask 'Peakaboo Night'`.
 - State lives in `%LOCALAPPDATA%\peakaboo\night\`: `state.json` for the configured `footage_root` (a different root, such as a test folder, gets its own `state_<8 hex>.json`), `night.log`, and `daemon.lock` (the PID of the running daemon). Under `pythonw`, Python's stdout and stderr also go to `night.log`. The token is never written to the log.
 
 Web: "夜の処理 … いま実行" (night run … run now):
 
-- The stream page (`/s/<stream_id>`) shows "夜の処理 <status> · いま実行" in the meta line. "いま実行" records a request (`night_requested_at`); the daemon picks it up within a minute. The VOD is the row's `vod_id`, else the VOD whose start is nearest to the stream's start within 60 minutes. A finished or stopped job is recreated and every step runs again, reusing the files that already exist.
+- The stream page (`/s/<stream_id>`) shows "夜の処理 <status> · いま実行" in the meta line. "いま実行" records a request (`night_requested_at`); the daemon picks it up within a minute. The VOD is the row's `vod_id`, else the VOD whose start is nearest to the stream's start within 60 minutes. A finished job is recreated with VOD, chat and Scout kept done, so only the chat videos, captions and plan are made again (new human stamps get their materials, and Scout does not add back candidates you deleted). A stopped job is recreated and every step runs again. Both reuse the files that already exist.
 - While a request is open or a job is running, the button is disabled and the page re-reads the status every 10 seconds. The status texts:
   - "要求済み" (requested): waiting for the daemon to pick it up.
   - "PC 側の常駐が動いていないようです" (the daemon on the PC does not seem to be running): no reply five minutes after the request. See troubleshooting.
@@ -208,7 +208,7 @@ Morning: "配信を取り込む" in Premiere Pro:
 1. Open the project in Premiere Pro. The panel must be connected to the service (see [サーバー / Server](#サーバー--server)).
 2. Click the "配信を取り込む" button (the download arrow next to the Short button). The popover shows "Footage の場所" (footage root; default `D:\Work_HDD\寺乃なあ\Footage`, remembered by the panel; paste paths with Japanese characters, because Japanese input does not work in the CEP panel) and "取り込み計画" (plan): every `_YYMMDD` folder that has a plan, newest first, as `_YYMMDD / peakaboo_<vodId>.json`. The newest is selected.
 3. Click "取り込む" (import). The status line goes through "素材を読み込み中", "同期中", "Short を作成中 (i/n)", "チャット動画を配置中", and "字幕を配置中":
-   1. The footage is imported into the bin `Footage/_YYMMDD`, and the full-length sequence `YYMMDD_<title>` is created in `Sequence/_YYMMDD` (or reused) and opened.
+   1. The footage is imported into the bin `Footage/_YYMMDD`, and the full-length sequence named after the footage (the plan's `sequence_name`, for example `YYMMDD_<title>` or `YYMMDD_<title>_2`; plans written before this field use `YYMMDD_<title>`) is created in `Sequence/_YYMMDD` (or reused) and opened.
    2. The service stream is opened, linked to that sequence with the offset −`vod_offset_sec` (the footage is the VOD, not the live timeline), and synced. On a freshly created sequence the confirmation drawer is skipped when its only reasons are the first sync and many additions; anything else (conflicts, mass deletion, warnings) stops there with "確認して同期したあと、もう一度「取り込む」を押してください".
    3. One Short sequence per stamp in the plan is created as with "候補から Sequence を作る" (human stamps included, `pre_sec` / `post_sec` from the plan).
    4. Each chat video is placed on V2 at 0 of its Short with an overwrite edit (V2 is added when missing; V1 and A1 are not touched). Chat videos are imported into `Footage/_YYMMDD/chat`.
@@ -240,7 +240,7 @@ scout\night.bat --vod 2914625472 --footage-root "C:\Work\Yato\Claude\_scratch\ni
 | `--daemon` | Run the resident loop (what the scheduled task runs) |
 | `--tick` | Run one daemon cycle and exit (testing) |
 
-Exit codes: `--vod` returns `0` when every step is done, `1` when a step failed, `2` when it could not start (config, token, VOD not among the newest 20 or still recording). `--daemon` / `--tick` return `2` without a token and `3` when another daemon holds the lock.
+Exit codes: `--vod` returns `0` when every step is done, `1` when a step failed, `2` when it could not start (config, token, VOD not among the newest 20 or still recording, or the daemon is running on the same `footage_root`). `--daemon` / `--tick` return `2` without a token and `3` when another daemon holds the lock.
 
 Troubleshooting:
 

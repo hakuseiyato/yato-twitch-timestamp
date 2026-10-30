@@ -51,6 +51,16 @@ class StartTest(unittest.TestCase):
     def test_naive_created_at_is_utc(self):
         naive = dict(self.VOD, createdAt='2026-10-30T06:03:22')
         self.assertEqual(night_lib.should_start(self.STATE, {'stream': None, 'videos': [naive]}, self.NOW), '2914625472')
+    def test_long_stream_uses_first_sighting(self):
+        # 9 時間の配信: 最初に見たのは VOD 開始の直後、最後に見たのは今 / a 9-hour stream: first seen right after the VOD start, last seen now
+        now = datetime(2026, 10, 30, 15, 10, tzinfo=timezone.utc)
+        state = {'last_live': {'stream_id': '316644129905', 'title': 'VALORANT', 'seen_at': '2026-10-30T15:00:00Z'},
+                 'live_history': [{'stream_id': '1', 'title': '', 'seen_at': '2026-10-29T06:00:00Z'},
+                                  {'stream_id': '316644129905', 'title': 'VALORANT', 'seen_at': '2026-10-30T06:10:00Z'}],
+                 'jobs': {}}
+        self.assertEqual(night_lib.should_start(state, {'stream': None, 'videos': [self.VOD]}, now), '2914625472')
+        # 履歴が無ければ従来どおり最後に見た時刻から 6 時間 / without history it falls back to the last sighting − 6 h
+        self.assertIsNone(night_lib.should_start(dict(state, live_history=[]), {'stream': None, 'videos': [self.VOD]}, now))
 
 class OffsetTest(unittest.TestCase):
     def test_offset(self):
@@ -63,6 +73,17 @@ class OffsetTest(unittest.TestCase):
         hist = [{'stream_id': '316644129905', 'seen_at': '2026-10-30T06:10:00Z'}]
         self.assertEqual(night_lib.match_stream_row(rows, hist, '2026-10-30T06:03:22Z')['stream_id'], '316644129905')
         self.assertIsNone(night_lib.match_stream_row(rows, [], '2026-10-30T06:03:22Z'))
+    def test_nearest_stream_row(self):
+        # 見張りが live を見損ねても、開始時刻が VOD に近い行を使う / a row whose start is near the VOD, even when the watcher missed the live
+        rows = [{'stream_id': 'far', 'started_at': '2026-10-30T04:00:00Z'},
+                {'stream_id': 'other-vod', 'started_at': '2026-10-30T06:03:20Z', 'vod_id': '999'},
+                {'stream_id': 'near', 'started_at': '2026-10-30T06:00:00.000Z'},
+                {'stream_id': 'nearer', 'started_at': '2026-10-30T06:05:00Z', 'vod_id': ''},
+                {'stream_id': 'broken', 'started_at': 'x'}]
+        self.assertEqual(night_lib.nearest_stream_row(rows, '2026-10-30T06:03:22Z')['stream_id'], 'nearer')
+        self.assertEqual(night_lib.nearest_stream_row(rows, '2026-10-30T06:03:22Z', vod_id='999')['stream_id'], 'other-vod')
+        self.assertIsNone(night_lib.nearest_stream_row(rows[:1], '2026-10-30T06:03:22Z'))
+        self.assertEqual(night_lib.nearest_stream_row(rows[:1], '2026-10-30T06:03:22Z', window_sec=3 * 3600)['stream_id'], 'far')
 
 class SrtTest(unittest.TestCase):
     SEG = [{'start': 100.0, 'end': 102.0, 'text': 'こんにちは'}, {'start': 110.0, 'end': 113.5, 'text': 'あ' * 25}, {'start': 200.0, 'end': 201.0, 'text': '範囲外'}]
@@ -104,6 +125,13 @@ class StepsTest(unittest.TestCase):
     def test_pending_compares_times_not_text(self):
         rows = [{'stream_id': 'm', 'night_requested_at': '2026-10-30T13:00:00.500Z', 'night_done_at': '2026-10-30T13:00:00Z'}]
         self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['m'])
+    def test_pending_skips_malformed_row(self):
+        # 壊れた時刻の行は飛ばし、他の行は拾う / a row with a broken time is skipped, the others are kept
+        rows = [{'stream_id': 'a', 'night_requested_at': '2026-10-30T13:00:00Z'},
+                {'stream_id': 'bad', 'night_requested_at': 'きのう'},
+                {'stream_id': 'bad2', 'night_requested_at': '2026-10-30T13:00:00Z', 'night_done_at': 'x'},
+                {'stream_id': 'c', 'night_requested_at': '2026-10-30T13:00:00Z', 'night_done_at': '2026-10-30T12:30:00Z'}]
+        self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['a', 'c'])
     def test_status_texts(self):
         self.assertEqual(night_lib.status_text_running('render', 3, 10), '処理中: チャット動画 3/10')
         self.assertEqual(night_lib.status_text_running('vod'), '処理中: VOD 保存')
@@ -114,7 +142,17 @@ class StepsTest(unittest.TestCase):
                                     pre_sec=15, post_sec=45, candidates=[], steps={}, finished_at='2026-10-30T13:20:00Z')
         self.assertEqual(plan['version'], 1)
         self.assertEqual(sorted(plan), sorted(['version', 'date_tag', 'stream_id', 'vod_id', 'title', 'footage', 'footage_existing',
-                                                'pre_sec', 'post_sec', 'candidates', 'steps', 'finished_at']))
+                                                'sequence_name', 'pre_sec', 'post_sec', 'candidates', 'steps', 'finished_at']))
+        self.assertEqual(plan['sequence_name'], 'x')
+    def test_sequence_name_is_footage_stem_without_vod(self):
+        # 素材名から作る（_2 は残し、末尾の _vod だけ落とす）/ from the footage name: _2 stays, only a trailing _vod goes
+        self.assertEqual(night_lib.sequence_name(r'D:\F\_261030\261030_気が向いたのでやります_vod.mp4'), '261030_気が向いたのでやります')
+        self.assertEqual(night_lib.sequence_name(r'D:\F\_261030\261030_X_2.mp4'), '261030_X_2')
+        self.assertEqual(night_lib.sequence_name('D:/F/_261030/261030_vod_talk.mp4'), '261030_vod_talk')
+        plan = night_lib.build_plan(date_tag='261030', stream_id='1', vod_id='2', title='X', footage=r'D:\F\261030_X_2_vod.mp4',
+                                    footage_existing=True, pre_sec=15, post_sec=45, candidates=[], steps={},
+                                    finished_at='2026-10-30T13:20:00Z')
+        self.assertEqual(plan['sequence_name'], '261030_X_2')
 
 
 if __name__ == '__main__':

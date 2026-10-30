@@ -1,5 +1,6 @@
 # night.py の常駐（tick・lock）のテスト。サーバー・GQL・run_job は偽物に差し替える
 # Tests for the night daemon (tick, lock); the server, GQL and run_job are faked
+import json
 import os
 import subprocess
 import sys
@@ -149,6 +150,36 @@ class RequestTest(TickBase):
         night.tick(self.loop_ctx([dict(REQUESTED)]), NOW)
         self.assertEqual(self.state.jobs['2914625472']['steps'], {})
 
+    def test_rerequest_on_finished_job_keeps_scout_done(self):
+        # 済んだ job への再要求は Scout を走らせず、チャット動画・字幕・計画だけ作り直す
+        # A re-request on a finished job does not run Scout again; only render, captions and plan are redone
+        footage = str(self.tmp / 'Footage' / '_261030' / '261030_VALORANTやる.mp4')
+        job = self.state.job('2914625472')
+        job.update(footage=footage, footage_existing=False, stream_id='316644129905', offset_note='差が大きい')
+        job['steps'] = {s: 'done' for s in night.night_lib.STEP_ORDER}
+        seen = {}
+
+        def capture(ctx):
+            seen.update(json.loads(json.dumps(ctx.state.job(str(ctx.vod['id'])))))
+            return _finishing_run_job(ctx)
+
+        self.run_job.side_effect = capture
+        night.tick(self.loop_ctx([dict(REQUESTED)]), NOW)
+        self.assertEqual(self.run_job.call_count, 1)
+        self.assertEqual(seen['steps'], {'vod': 'done', 'chat': 'done', 'scout': 'done'})
+        self.assertEqual(seen['footage'], footage)
+        self.assertEqual(seen['stream_id'], '316644129905')
+        self.assertEqual(seen['offset_note'], '差が大きい')
+
+    def test_rerequest_on_stopped_job_resets_every_step(self):
+        footage = str(self.tmp / 'Footage' / '_261030' / '261030_VALORANTやる.mp4')
+        job = self.state.job('2914625472')
+        job.update(footage=footage, stopped=True, error={'step': 'render', 'reason': 'x', 'count': 3})
+        job['steps'] = {s: 'done' for s in ('vod', 'chat', 'scout')}
+        night.tick(self.loop_ctx([dict(REQUESTED)]), NOW)
+        self.assertEqual(self.state.jobs['2914625472']['steps'], {})
+        self.assertEqual(self.state.jobs['2914625472']['footage'], footage)
+
 
 class WatchTest(TickBase):
     def test_c_gql_not_polled_again_within_poll_minutes(self):
@@ -276,6 +307,56 @@ class LockTest(unittest.TestCase):
         self.lock.write_text(str(child.pid), encoding='utf-8')
         self.assertTrue(night.acquire_lock(self.lock))
         self.assertEqual(self.lock.read_text(encoding='utf-8'), str(os.getpid()))
+
+
+class OneShotLockTest(unittest.TestCase):
+    """--vod は常駐と同じ state.json を使うときだけ lock を取る / --vod takes the lock only on the daemon's state.json."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.lock = self.tmp / 'night' / 'daemon.lock'
+        self.lock.parent.mkdir(parents=True)
+        self.run_job = mock.MagicMock(side_effect=lambda ctx: ctx.state.job(str(ctx.vod['id'])))
+        cfg = dict(NIGHT_CFG, footage_root=str(self.tmp / 'Footage'))
+        for p in (mock.patch.object(night, 'NIGHT_DIR', self.tmp / 'night'),
+                  mock.patch.object(night, 'LOCK_PATH', self.lock),
+                  mock.patch.object(night, 'setup_logging'),
+                  mock.patch.object(night, 'load_night_config', return_value=cfg),
+                  mock.patch.object(night.scout, 'load_config', return_value={'server': 'http://x', 'token_path': 't'}),
+                  mock.patch.object(night.scout, 'read_token', return_value='ytt_x'),
+                  mock.patch.object(night, 'find_vod', return_value=dict(VOD)),
+                  mock.patch.object(night, 'run_job', self.run_job)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_shared_root_refuses_while_daemon_lives(self):
+        # 親プロセスは lock より前から生きている（常駐の代わり）/ the parent process stands in for a live daemon
+        self.lock.write_text(str(os.getppid()), encoding='utf-8')
+        with self.assertLogs('night', level='ERROR') as logs:
+            self.assertEqual(night.main(['--vod', VOD['id']]), 2)
+        self.run_job.assert_not_called()
+        self.assertIn(f'常駐が動いています（PID {os.getppid()}）', '\n'.join(logs.output))
+        self.assertEqual(self.lock.read_text(encoding='utf-8'), str(os.getppid()))
+
+    def test_shared_root_takes_and_releases_the_lock(self):
+        def check_lock(ctx):
+            self.assertEqual(self.lock.read_text(encoding='utf-8'), str(os.getpid()))
+            return ctx.state.job(str(ctx.vod['id']))
+
+        self.run_job.side_effect = check_lock
+        night.main(['--vod', VOD['id']])
+        self.run_job.assert_called_once()
+        self.assertFalse(self.lock.exists())
+
+    def test_other_root_does_not_take_the_lock(self):
+        self.lock.write_text(str(os.getppid()), encoding='utf-8')
+        night.main(['--vod', VOD['id'], '--footage-root', str(self.tmp / 'other')])
+        self.run_job.assert_called_once()
+        self.assertEqual(self.lock.read_text(encoding='utf-8'), str(os.getppid()))
 
 
 if __name__ == '__main__':

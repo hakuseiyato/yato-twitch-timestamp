@@ -134,15 +134,44 @@ def state_path_for(footage_root: Path | str, config_root: Path | str) -> Path:
     return NIGHT_DIR / f'state_{hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]}.json'
 
 
-def reset_job(state: State, vod_id: str, day_dir: Path) -> dict:
-    """--force: job を作り直す。素材名は同じ日フォルダにあるときだけ引き継ぐ（前回の VOD を人の録画と取り違えない）。
-    --force: recreate the job, keeping the footage name only when it lives in the same day folder
-    (so the earlier download is not mistaken for a human recording)."""
+# 済んだ job への再要求で済みのまま残す段（Scout を走らせ直すと人が間引いた候補が戻る）
+# Steps kept done on a re-request of a finished job (re-running Scout would bring back candidates people pruned)
+_KEEP_ON_RERUN = ('vod', 'chat', 'scout')
+
+
+def reset_job(state: State, vod_id: str, day_dir: Path, keep_steps: tuple[str, ...] = ()) -> dict:
+    """job を作り直す。素材名は同じ日フォルダにあるときだけ引き継ぐ（前回の VOD を人の録画と取り違えない）。
+    Recreate the job, keeping the footage name only when it lives in the same day folder
+    (so the earlier download is not mistaken for a human recording).
+
+    Parameters
+    ----------
+    state : State
+        job を持つ状態 / The state holding the job.
+    vod_id : str
+        作り直す VOD / The VOD whose job is recreated.
+    day_dir : Path
+        その VOD の日フォルダ / The VOD's day folder.
+    keep_steps : tuple[str, ...]
+        済みのまま残す段。素材名を引き継げたときだけ残し、後の段が使う stream_id・offset_note も写す。
+        Steps kept done, only when the footage name carried over; stream_id and offset_note, which later
+        steps use, are copied too.
+
+    Returns
+    -------
+    dict
+        新しい job / The new job.
+    """
     old = state.jobs.pop(str(vod_id), None) or {}
     job = state.job(str(vod_id))
     if old.get('footage') and Path(old['footage']).parent.resolve() == Path(day_dir).resolve():
         job['footage'] = old['footage']
         job['footage_existing'] = old.get('footage_existing', False)
+        for step in keep_steps:
+            if (old.get('steps') or {}).get(step) == 'done':
+                job['steps'][step] = 'done'
+        if keep_steps:
+            job.update({key: old[key] for key in ('stream_id', 'offset_note') if key in old})
     return job
 
 
@@ -177,13 +206,22 @@ def _cache_dir(ctx: JobContext) -> Path:
     return Path(ctx.cfg['cache_dir']) / str(ctx.vod['id'])
 
 
-def _remove_parts(final: Path) -> None:
-    """前回の途中ファイル（<名前>.part…）を消す / Delete leftovers (<name>.part…) of an earlier attempt."""
-    prefix = final.stem + '.part'
+def _remove_parts(final: Path, resume_data: bool = False) -> None:
+    """自分の途中ファイルだけ消す。既定は出力の一時名 <名前>.part<拡張子> だけ。
+    Delete only our own temp files; by default just the output temp name <name>.part<ext>.
+
+    resume_data=True（置き換えが済んだ後）は yt-dlp の続きのデータ（<一時名>.part / .ytdl / <名前>.part.f*）も消す。
+    再試行の前に消すと yt-dlp が途中から続けられないので、そのときは残す。人の <名前>.part2.mp4 などは触らない。
+    resume_data=True (after a successful replace) also removes yt-dlp resume data (<temp>.part / .ytdl /
+    <name>.part.f*); it is kept before a retry so yt-dlp can resume. Human files such as <name>.part2.mp4 are never touched.
+    """
+    temp = final.stem + '.part' + final.suffix
+    names = {temp, temp + '.part', temp + '.ytdl'} if resume_data else {temp}
+    formats = final.stem + '.part.f'  # yt-dlp の形式別ファイル / yt-dlp per-format files
     if not final.parent.exists():
         return
     for p in final.parent.iterdir():
-        if p.is_file() and p.name.startswith(prefix):
+        if p.is_file() and (p.name in names or (resume_data and p.name.startswith(formats))):
             log.info('途中ファイルを削除: %s', p.name)
             p.unlink()
 
@@ -230,13 +268,15 @@ def step_vod(ctx: JobContext, job: dict) -> None:
                      '--newline', '--progress-delta', '30', '--encoding', 'utf-8',
                      '-o', str(part).replace('%', '%%'), f'https://www.twitch.tv/videos/{ctx.vod["id"]}'])
         os.replace(part, final)
+        _remove_parts(final, resume_data=True)
         log.info('VOD を保存: %s（%.2f GB）', final.name, final.stat().st_size / 1e9)
     job['steps']['vod'] = 'done'
 
 
 def _resolve_row(ctx: JobContext, job: dict) -> dict:
-    """VOD の配信行を決める: 記録済み → 渡された行 → vod_id 一致 → 見張りの履歴 → vod-<id> で登録。
-    Pick the VOD's stream row: stored id → given row → same vod_id → watcher history → register vod-<id>."""
+    """VOD の配信行を決める: 記録済み → 渡された行 → vod_id 一致 → 見張りの履歴 → 開始が 60 分以内の行 → vod-<id> で登録。
+    Pick the VOD's stream row: stored id → given row → same vod_id → watcher history → row starting within 60 min
+    → register vod-<id>."""
     if job.get('stream_id'):
         return ctx.client.get(f'/api/streams/{scout.seg(job["stream_id"])}')['stream']
     if ctx.stream_row:
@@ -245,6 +285,8 @@ def _resolve_row(ctx: JobContext, job: dict) -> dict:
     rows = ctx.client.get(f'/api/channels/{scout.seg(ctx.cfg["channel"])}/streams')['streams']
     row = next((r for r in rows if str(r.get('vod_id') or '') == str(vod['id'])), None)
     row = row or night_lib.match_stream_row(rows, ctx.state.live_history, vod['createdAt'])
+    # 見張りが live を遅れて見た・見損ねたときも既存の行に寄せる / reuse an existing row when the watcher saw the live late or missed it
+    row = row or night_lib.nearest_stream_row(rows, vod['createdAt'], vod_id=str(vod['id']))
     if row:
         return row
     log.info('配信行が無いため vod-%s で登録', vod['id'])
@@ -650,6 +692,11 @@ def _handle_request(ctx: LoopContext, row: dict, snapshot: Callable[[], dict]) -
     Handle one web request. A finished or stopped job is recreated (keeping the footage name within the day folder)
     so the steps run again and skip files that already exist.
 
+    済んだ job は VOD・チャット・候補を済みのまま残す（新しい人のスタンプに素材を作るだけで、間引いた候補を Scout で
+    足し直さない）。止まった・失敗した job は全段やり直す。
+    A finished job keeps VOD, chat and Scout done (new human stamps get materials without Scout refilling pruned
+    candidates); a stopped or failed job redoes every step.
+
     Returns
     -------
     str | None
@@ -671,7 +718,9 @@ def _handle_request(ctx: LoopContext, row: dict, snapshot: Callable[[], dict]) -
     vod_id = str(vod['id'])
     old = ctx.state.jobs.get(vod_id)
     if old is not None and (old.get('stopped') or night_lib.next_step(old) is None):
-        reset_job(ctx.state, vod_id, Path(ctx.footage_root) / f'_{night_lib.date_tag_jst(vod["createdAt"])}')
+        finished = not old.get('stopped') and not old.get('error')
+        reset_job(ctx.state, vod_id, Path(ctx.footage_root) / f'_{night_lib.date_tag_jst(vod["createdAt"])}',
+                  keep_steps=_KEEP_ON_RERUN if finished else ())
     _start_job(ctx, vod, row)
     return vod_id
 
@@ -805,6 +854,14 @@ def release_lock(path: Path = LOCK_PATH) -> None:
         log.warning('lock を消せません: %s', e)
 
 
+def _lock_owner(path: Path) -> str:
+    """lock に書かれた PID（読めなければ '不明'）/ The PID written in the lock, or '不明' when unreadable."""
+    try:
+        return path.read_text(encoding='utf-8').strip() or '不明'
+    except OSError:
+        return '不明'
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog='night', description='Peakaboo 夜の処理 / night runner')
     mode = p.add_mutually_exclusive_group(required=True)
@@ -829,28 +886,42 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     if args.daemon or args.tick:
         return main_daemon(args)
+    locked = False
     try:
-        night_cfg = load_night_config(args.config)
-        config_root = night_cfg['footage_root']
-        if args.footage_root:
-            night_cfg['footage_root'] = args.footage_root
-        cfg_path = Path(args.config).resolve().parent / 'scout.config.json'
-        cfg = scout.load_config(cfg_path)
-        client = api.Client(cfg['server'], scout.read_token(Path(cfg['token_path'])))
-        state = State(state_path_for(night_cfg['footage_root'], config_root)).load()
-        vod = find_vod(night_cfg['channel'], args.vod)
-    except (scout.ScoutExit, api.ApiError, ValueError, OSError) as e:
-        log.error('起動できません: %s', _reason(e))
-        return 2
-    log.info('夜の処理を開始: VOD %s「%s」素材 %s 状態 %s', vod['id'], vod['title'], night_cfg['footage_root'], state.path)
-    ctx = JobContext(client=client, cfg=cfg, night_cfg=night_cfg, state=state, vod=vod, stream_row=None,
-                     footage_root=Path(night_cfg['footage_root']), notify=notify,
-                     status=lambda text: log.info('状態: %s', text), scout_config_path=cfg_path)
-    if args.force:
-        reset_job(state, args.vod, _day_dir(ctx))
-        state.save()
-    job = run_job(ctx)
-    return 0 if night_lib.next_step(job) is None else 1
+        try:
+            night_cfg = load_night_config(args.config)
+            config_root = night_cfg['footage_root']
+            if args.footage_root:
+                night_cfg['footage_root'] = args.footage_root
+            cfg_path = Path(args.config).resolve().parent / 'scout.config.json'
+            cfg = scout.load_config(cfg_path)
+            client = api.Client(cfg['server'], scout.read_token(Path(cfg['token_path'])))
+            state = State(state_path_for(night_cfg['footage_root'], config_root))
+            # 常駐と同じ state.json を使うなら lock を取る（同時に書くと片方の進み具合が消える）。試験の保存先は取らない
+            # Take the lock when sharing the daemon's state.json (concurrent writes lose one side's progress); test roots do not
+            if state.path == NIGHT_DIR / 'state.json':
+                if not acquire_lock(LOCK_PATH):
+                    log.error("常駐が動いています（PID %s）。先に Stop-ScheduledTask 'Peakaboo Night' を実行してください",
+                              _lock_owner(LOCK_PATH))
+                    return 2
+                locked = True
+            state.load()
+            vod = find_vod(night_cfg['channel'], args.vod)
+        except (scout.ScoutExit, api.ApiError, ValueError, OSError) as e:
+            log.error('起動できません: %s', _reason(e))
+            return 2
+        log.info('夜の処理を開始: VOD %s「%s」素材 %s 状態 %s', vod['id'], vod['title'], night_cfg['footage_root'], state.path)
+        ctx = JobContext(client=client, cfg=cfg, night_cfg=night_cfg, state=state, vod=vod, stream_row=None,
+                         footage_root=Path(night_cfg['footage_root']), notify=notify,
+                         status=lambda text: log.info('状態: %s', text), scout_config_path=cfg_path)
+        if args.force:
+            reset_job(state, args.vod, _day_dir(ctx))
+            state.save()
+        job = run_job(ctx)
+        return 0 if night_lib.next_step(job) is None else 1
+    finally:
+        if locked:
+            release_lock(LOCK_PATH)
 
 
 def main_daemon(args: argparse.Namespace) -> int:
