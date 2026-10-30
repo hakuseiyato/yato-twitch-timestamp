@@ -45,7 +45,7 @@ export interface StampRow {
   // 0 / 1（1 は墓標）/ 0 / 1 (1 is a tombstone)
   deleted: number;
   clock_skew_ms: number | null;
-  // 'extension' / 'web' / 'panel'
+  // 'extension' / 'web' / 'panel' / 'scout'
   source: string | null;
 }
 

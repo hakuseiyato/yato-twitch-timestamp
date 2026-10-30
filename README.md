@@ -81,6 +81,66 @@ Reading failures:
   - "ログインが必要です / login required": log in again (see below).
 - Twitch login tokens from the implicit grant expire after about four hours. When the server answers 401, or when the extension finds the token expired while stamping, the popup shows "トークンが切れました。再ログインしてください / Token expired. Log in again". Click "ログイン"; the queued records are sent after the login. Stamps keep being saved locally in the meantime.
 
+## Scout（候補検知） / Scout (highlight candidates)
+
+Scout (`scout/`) is a local command-line tool that listens to a stream's VOD, picks moments that look like highlights, and posts them to the cloud service as **candidate stamps**. Candidates are ordinary stamps whose memo starts with `候補:` and whose `source` is `scout`; people then keep, edit, or delete them on the web or in Premiere Pro like any other stamp. The stream must already be registered on the service from its VOD (`/` → "VOD から登録").
+
+Prerequisites:
+
+- Python 3.13 with `numpy` and `faster-whisper`, plus the NVIDIA CUDA wheels faster-whisper uses (for example `nvidia-cublas-cu12`). Scout puts the `nvidia\*\bin` DLL folders of those wheels on `PATH` itself.
+- `ffmpeg` and `yt-dlp` on `PATH`.
+- An NVIDIA GPU is recommended. Without CUDA, Scout falls back to the CPU automatically (or use `--cpu`), which is much slower.
+- A panel token (`ytt_…`) issued on `/me`, and membership of the channel (`/admin`).
+
+First run:
+
+1. Sign in on the service, open `/me`, and issue a token.
+2. Double-click `scout\scout.bat`. When asked "Peakaboo の /me で発行した ytt_ トークンを貼り付けてください / Paste the ytt_ token issued on /me", paste it and press Enter. The input is hidden. The token is saved to `token_path` (`%APPDATA%\peakaboo\scout.token` by default) and not asked again. If the server later answers 401, issue a new token on `/me` and replace the contents of that file.
+
+Usage:
+
+1. Double-click `scout\scout.bat` (it runs `python -I scout.py` and keeps the window open at the end).
+2. Scout lists the newest 15 streams of the configured channel (`channel` in `scout.config.json`, `terano_naa` by default). The newest stream with a VOD is marked "[既定 / default]"; press Enter to accept it or type a row number. A stream without a VOD stops with "Web で VOD から登録してください / Register the VOD on the web first".
+3. Scout downloads the VOD's audio-only stream with `yt-dlp`, converts it to 16 kHz mono with `ffmpeg`, and transcribes it with faster-whisper (`large-v3-turbo`, CUDA float16; CPU int8 with `--cpu` or as the fallback). A 2.5-hour VOD took about 1 minute to download and 3 minutes to transcribe on an RTX 4070 Ti. The transcript is cached, so a second run on the same VOD skips both steps.
+4. It fetches the stream's stamps and chat (if the chat was never imported it says "チャット信号なし / no chat signals" and scores from the audio alone) and shows a table: 配信時刻 / stream time, VOD時刻 / VOD time, 点 / score, 理由 / reason, 発言 / utterance.
+5. "送信しますか？ / Send? y/N": `y` sends all candidates in one `POST /api/stamps` with `source: 'scout'`; anything else sends nothing.
+
+Options (pass them after `scout.bat` from a terminal, or run `python -I scout.py …` in `scout/`):
+
+| Option | Meaning |
+|---|---|
+| `--stream <id>` | Use this stream id instead of choosing from the list |
+| `--server <url>` | Server URL, overriding `server` in the config |
+| `--dry-run` | Show the table and send nothing |
+| `--top N` | Candidate cap, overriding `cap_total` |
+| `--replace` | Delete (tombstone) your own previous candidates for the stream and pick again; the tombstones go in the same POST after the `y` confirmation |
+| `--cpu` | Run Whisper on the CPU |
+| `--config <path>` | Another config file instead of `scout/scout.config.json` |
+
+Exit codes: `0` sent (or `--dry-run`), `1` no candidates or not sent, `2` error. The log is appended to `<cache_dir>\<vod_id>\scout.log` (`cache_dir` is `%LOCALAPPDATA%\peakaboo\scout` by default), next to the cached audio and `transcript.json`.
+
+How candidates are chosen:
+
+- The VOD is split into 0.5-second bins and scored with five signals, each normalised to 0–1 and weighted: 声の急変 (sudden change in voice level), 笑い (laughter), 発言 (keywords in the transcript), チャット急増 (chat spike), and チャットの反応 (reaction words in chat). A bin becomes a peak when the weighted sum reaches `threshold` (2.0 out of a maximum of 4.3 with the default weights, so several signals have to agree). Without chat the threshold is scaled down to the share of weight the audio signals carry.
+- Peaks within `merge_sec` (20 s) are merged. Anything within `exclude_radius_sec` (±30 s) of a human stamp (not deleted) or of an existing candidate is dropped; candidates that were deleted still count, so a rejected moment is not proposed again (except your own candidates replaced by `--replace`).
+- A stream gets at most `cap_total` (10) candidates in total, existing candidates that are not deleted included.
+- The memo is `候補: <reasons> | <what was said>`, for example `候補: 笑い・チャット急増 | …`.
+
+Where candidates appear:
+
+- **Web (`/s/<id>`)**: candidates are violet vertical lines on the graph (human stamps stay amber). In the stamp list they have a violet left border, a "候補" badge, and the memo without its prefix. "候補を先に / Candidates first" lists them before the other stamps. Delete a wrong candidate as usual; the author or a channel owner can delete it.
+- **Premiere Pro panel**: after "同期", candidate markers are yellow. Yellow is reserved for candidates, so human markers cycle through the other colors.
+
+Creating Short sequences (Premiere Pro only):
+
+The button next to the frame-export button ("候補から Sequence を作る / Create Short sequences") opens a popover with "前 / Before (s)" (default 15), "後 / After (s)" (default 45), "人のマーカーも / Include human markers", and "作成 / Create". For every Peakaboo marker (one with a `[yts:…]` tag) that is a candidate, or every one when the check box is on, the panel sets the active sequence's In/Out to [marker − before, marker + after], creates a subsequence, names it `Short_NN_<memo without the prefix, up to 20 characters>` (made unique), removes the markers copied into it, and moves it to the `Peakaboo_Shorts` bin. The original In/Out points are restored afterwards. The before/after values are remembered between sessions. This has not been verified in a real Premiere Pro yet; 実機確認は Yato さんの手順書に従う.
+
+Tuning:
+
+Edit `scout/scout.config.json`: `weights` (per signal), `threshold`, `keyword_words` (transcript keywords), `laugh_words`, `chat_words`, `exclude_radius_sec`, `merge_sec`, and `cap_total`. Because the transcript is cached, a re-run with `--dry-run` re-scores in seconds; compare the table with what you would have picked and adjust. Use `--replace` to swap your previous candidates for the new ones.
+
+Privacy: the audio and the transcript stay on your machine in `cache_dir`. Only the candidate stamps (the 13 stamp columns: time, memo, your login, and so on) are sent to the server.
+
 ## Lag compensation
 
 The lag setting estimates the delay between the broadcast timeline and what the viewer sees. Its default is five seconds. The extension subtracts this value from both locally calculated offsets and Twitch's native `position_seconds`, keeping native and local records on the same compensated timeline. Local timing also corrects clock skew using the Twitch response `Date` header. Set the lag value according to the viewing setup shared by the stamping team.
@@ -214,7 +274,7 @@ Thumbnails are drawn by seeking the source video in the panel's `<video>` elemen
 
 Premiere Pro marker comments contain `by: <by> [yts:<id>]`. Do not remove the `[yts:id]` tag because it identifies the marker. After Effects stores the ID in the marker's `yts_id` parameter and uses a comment tag as a fallback. The `<CSV name>.yts-sync.json` sidecar stores link and merge state, including base entries shaped as `{ t, memo, autoName }`, and must remain next to the CSV.
 
-Native Twitch markers are green. Other marker colors are assigned per recorder (`by`) and cycle in order of first appearance.
+Native Twitch markers are green. In Premiere Pro, Scout candidates (see [Scout](#scout候補検知--scout-highlight-candidates)) are yellow. Other marker colors are assigned per recorder (`by`) and cycle in order of first appearance.
 
 The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves relative paths from the junction, so it cannot reach files outside the panel). `panel\install.ps1` refreshes the copy; re-run it after editing `extension/lib.js`. `node tests/test_lib.js` fails when the copy is stale.
 
@@ -252,6 +312,12 @@ The library tests cover Twitch URL parsing, offset and timecode calculations, cl
 node tests/test_lib.js --write-sample
 ```
 
+Scout's tests (signal scoring and the API client; no GPU, network, or VOD needed) run with:
+
+```sh
+python -m unittest discover -s scout/tests -v
+```
+
 ## Project layout
 
 - `extension/` — Manifest V3 extension, popup, content UI, service worker, and pure shared library.
@@ -261,4 +327,5 @@ node tests/test_lib.js --write-sample
 - `tests/test_background.js` / `tests/fake_chrome.js` — service worker tests on a fake `chrome` and `fetch`; `tests/test_popup_markup.js` — popup element checks.
 - `service/` — Cloudflare Worker (D1 + R2 + static pages) for the cloud service; see `service/README.md`.
 - `tests/test_service_web.js` — dependency-free Node tests for the service's page logic (bins, chat shaping, VOD selection).
+- `scout/` — Scout, the local highlight-candidate tool: `scout.bat` / `scout.py` (CLI), `audio.py` (download, conversion, Whisper), `signals.py` (scoring), `api.py` (service client), `scout.config.json`, and `tests/`.
 - `samples/sample.csv` — example sync-file data including a multiline Japanese memo.

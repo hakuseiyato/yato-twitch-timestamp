@@ -190,7 +190,7 @@ cookie で認証した変更系（POST / PUT / PATCH / DELETE）は `X-Requested
 | `channels` | `login` | 配信チャンネル |
 | `members` | `(channel, login)` | 会員と役割（`owner` / `editor`） |
 | `streams` | `stream_id` | 配信。`vod_id`、`vod_offset_sec`（既定 0）、`chat_lag_sec`（既定 5）、チャットの R2 キーと件数 |
-| `stamps` | `(stream_id, id)` | スタンプ。同期 CSV の列に `source`（`extension` / `web` / `panel`）を足したもの。削除は `deleted=1` の墓標 |
+| `stamps` | `(stream_id, id)` | スタンプ。同期 CSV の列に `source`（`extension` / `web` / `panel` / `scout`）を足したもの。Scout の候補は `memo` が `候補:` で始まり `source` が `scout` の行（スキーマは同じ）。削除は `deleted=1` の墓標 |
 | `api_tokens` | `hash` | `ytt_` トークンの SHA-256 |
 | `sessions` | `id` | session cookie（30 日） |
 | `token_cache` | `hash` | Twitch トークン検証結果のキャッシュ（トークンの SHA-256 をキーに 1 時間）。トークン自体は保存しない |
