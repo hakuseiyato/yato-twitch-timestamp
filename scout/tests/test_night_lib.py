@@ -66,9 +66,9 @@ class SrtTest(unittest.TestCase):
         self.assertTrue(srt.startswith('\ufeff1\r\n00:00:10,000 --> 00:00:12,000\r\nこんにちは\r\n'))
         self.assertIn('2\r\n00:00:20,000 --> 00:00:23,500\r\n' + 'あ' * 20 + '\r\n' + 'あ' * 5 + '\r\n', srt)
         self.assertNotIn('範囲外', srt)
-    def test_clamps_negative_start(self):
-        srt = night_lib.srt_for_window([{'start': 3.0, 'end': 20.0, 'text': 'x'}], 20.0, 15, 45)
-        self.assertIn('00:00:00,000 --> 00:00:15,000', srt)
+    def test_window_starting_before_vod_zero_is_not_shifted(self):
+        srt = night_lib.srt_for_window([{'start': 3.0, 'end': 20.0, 'text': 'x'}], 10.0, 15, 45)
+        self.assertIn('00:00:03,000 --> 00:00:20,000', srt)
     def test_empty(self):
         self.assertEqual(night_lib.srt_for_window(self.SEG, 1000.0, 15, 45), '')
 

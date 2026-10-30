@@ -130,13 +130,15 @@ def _srt_time(sec: float) -> str:
 
 
 def srt_for_window(segments: list[dict], t_vod: float, pre: float, post: float, line_chars: int = 20) -> str:
-    """[t−pre, t+post] に重なる文字起こしを t−pre 基準の SRT（先頭 BOM・CRLF）にする。重なりが無ければ ''。
-    Build an SRT (BOM, CRLF) of segments overlapping [t−pre, t+post], shifted to t−pre; '' when none overlap.
+    """[t−pre, t+post] に重なる文字起こしを max(0, t−pre) 基準の SRT（先頭 BOM・CRLF）にする。重なりが無ければ ''。
+    Build an SRT (BOM, CRLF) of segments overlapping [t−pre, t+post], shifted to max(0, t−pre); '' when none overlap.
 
-    開始が負になるものは 0 に詰め、終わりは窓で切らない。本文は line_chars 文字ごとに折り返す。
-    Negative starts are clamped to 0; ends are not cut to the window. Text wraps every line_chars characters.
+    Short とチャット動画は VOD 時刻 max(0, t−pre) から始まるので、字幕もそこを 0 秒にする。
+    The Short and the chat render start at VOD time max(0, t−pre), so captions use that as 0 s.
+    窓より前から続く発話の開始は 0 に詰め、終わりは窓で切らない。本文は line_chars 文字ごとに折り返す。
+    Speech starting before the window is clamped to 0; ends are not cut to the window. Text wraps every line_chars characters.
     """
-    origin = t_vod - pre
+    origin = max(0.0, t_vod - pre)
     stop = t_vod + post
     cues = []
     for seg in segments:
