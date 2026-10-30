@@ -1230,6 +1230,15 @@ const TSLib = (function () {
     return CANDIDATE_PATTERN.test(String(memo || ''));
   }
 
+  // Web でスタンプを消せるか: 付けた本人（大文字小文字を無視）・そのチャンネルの owner・site_admin。墓標は不可
+  // Whether a stamp can be deleted from the web: its author (case-insensitive), an owner of the channel, or a site admin; never a tombstone.
+  function canDeleteStamp(me, channel, stamp) {
+    if (!me || !stamp || stamp.deleted === true) return false;
+    if (String(stamp.by || '').toLowerCase() === String(me.login || '').toLowerCase()) return true;
+    if (me.site_admin === true) return true;
+    return (me.channels || []).some(function (c) { return c && c.login === channel && c.role === 'owner'; });
+  }
+
   // sort 用: 候補を先に、同じ区分なら offset_sec 昇順、同値なら id 昇順
   // Sort comparator: candidates first, then offset_sec ascending, then id ascending.
   function candidateFirst(a, b) {
@@ -1260,6 +1269,7 @@ const TSLib = (function () {
     CANDIDATE_PREFIX: CANDIDATE_PREFIX,
     CANDIDATE_PATTERN: CANDIDATE_PATTERN,
     isCandidate: isCandidate,
+    canDeleteStamp: canDeleteStamp,
     candidateFirst: candidateFirst,
     shortSequenceName: shortSequenceName,
     posToFractions: posToFractions,

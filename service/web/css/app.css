@@ -486,7 +486,8 @@ ul.rows li.empty { display: block; }
 ul.rows li.hi, ul.rows li.in-bin { background: var(--sel); }
 ul.rows li.flash { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
 ul.rows .by { color: var(--ink-3); }
-ul.rows .x { float: right; padding: 0 4px; color: var(--ink-3); cursor: pointer; }
+/* × は本物の <button>。既定のボタンの枠・地・高さを外して文字だけにする / The × is a real <button>; drop the default button frame, fill and height so only the glyph shows */
+ul.rows .x { float: right; min-height: 0; padding: 0 4px; border: 0; background: none; box-shadow: none; color: var(--ink-3); font-weight: 400; line-height: inherit; cursor: pointer; }
 ul.rows .x:hover { color: var(--err); }
 
 /* 旧マークアップの行（stream.js / comments.js が .row-time .row-name .row-text の 3 セルを出す）。

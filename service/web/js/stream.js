@@ -180,6 +180,17 @@
           el('span', { class: 'by', text: s.by })
         ]);
       }
+      // 消せる人（本人・owner・site_admin）にだけ × を出す / The × only for those who may delete (author, owner, site admin)
+      if (TSLib.canDeleteStamp(me, stream.channel, s)) {
+        const remove = el('button', { type: 'button', class: 'x', 'aria-label': '削除', title: 'このスタンプを削除', text: '×' });
+        remove.addEventListener('click', function (event) {
+          // 行のクリック（将来のシーク）に伝えない / Keep the click from reaching the row (future seek)
+          event.stopPropagation();
+          if (!confirm('このスタンプを削除しますか？\n' + tc(s.offset_sec) + ' ' + (s.memo || ''))) return;
+          deleteStamp(s, remove);
+        });
+        body.append(remove);
+      }
       return el('li', { class: candidate ? 'cand candidate' : 'human' }, [
         el('span', { class: 't', text: tc(s.offset_sec) }),
         body
@@ -197,6 +208,32 @@
     $('stamp-empty').hidden = stamps.length > 0;
     // メタ行のスタンプ数・候補数・長さも追従させる / Keeps the meta line's stamp and candidate counts and length in step
     renderHead();
+  }
+
+  // 墓標（deleted: true・新しい updated_at）を送り、受理されたら一覧とグラフから外す
+  // Sends a tombstone (deleted: true with a newer updated_at); once accepted, drops the stamp from the list and graph
+  async function deleteStamp(s, button) {
+    showError('');
+    const tomb = TSLib.tombstoneRecord(s, new Date().toISOString());
+    // 成功時は行ごと組み直されるので、ボタンを戻すのは失敗時だけ / On success the row is rebuilt, so the button is restored only on failure
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      const result = await api('/api/stamps', { method: 'POST', body: { records: [tomb], source: 'web' } });
+      if ((result.accepted || []).includes(s.id)) {
+        stamps = stamps.filter(function (x) { return x !== s; });
+        renderStamps();
+        redraw();
+        setStatus($('page-status'), 'スタンプを削除しました', 'ok');
+        return;
+      }
+      const reason = ((result.rejected || [])[0] || {}).reason || 'unknown';
+      showError(reason === 'forbidden' ? '削除できるのは本人とチャンネルの owner だけです' : '削除できませんでした: ' + errorText({ error: reason }));
+    } catch (e) {
+      showError('削除できませんでした: ' + messageOf(e));
+    }
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
   }
 
   // ---- グラフ / Graph ----

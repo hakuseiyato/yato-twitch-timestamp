@@ -1142,4 +1142,16 @@ assert.strictEqual(TSLib.shortSequenceName('候補： 笑い | x', 2), 'Short_02
     assert.strictEqual(jsx.isCandidate(memo), TSLib.isCandidate(memo), String(memo));
   }
 }
+// Web でのスタンプ削除の可否 / Whether a stamp can be deleted from the web
+const owner = { login: 'yato', channels: [{ login: 'terano_naa', role: 'owner' }], site_admin: false };
+const editor = { login: 'mod1', channels: [{ login: 'terano_naa', role: 'editor' }], site_admin: false };
+const admin = { login: 'root', channels: [], site_admin: true };
+const mine = { id: 'y0000001', by: 'Mod1', memo: 'x', deleted: false };
+const theirs = { id: 'y0000002', by: 'someone', memo: '候補: 笑い', deleted: false };
+assert.strictEqual(TSLib.canDeleteStamp(editor, 'terano_naa', mine), true);     // 本人（大文字小文字を無視）
+assert.strictEqual(TSLib.canDeleteStamp(editor, 'terano_naa', theirs), false);  // editor は他人の分を消せない
+assert.strictEqual(TSLib.canDeleteStamp(owner, 'terano_naa', theirs), true);    // owner は消せる
+assert.strictEqual(TSLib.canDeleteStamp(owner, 'other_ch', theirs), false);     // 別チャンネルの owner は不可
+assert.strictEqual(TSLib.canDeleteStamp(admin, 'terano_naa', theirs), true);    // site_admin は可
+assert.strictEqual(TSLib.canDeleteStamp(owner, 'terano_naa', Object.assign({}, theirs, { deleted: true })), false);
 console.log('all tests passed');
