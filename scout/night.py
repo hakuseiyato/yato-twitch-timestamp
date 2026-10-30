@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -112,6 +113,28 @@ class State:
         if not any(e['stream_id'] == entry['stream_id'] for e in self.live_history):
             self.live_history.append(dict(entry))
             del self.live_history[:-LIVE_HISTORY_MAX]
+
+
+def state_path_for(footage_root: Path | str, config_root: Path | str) -> Path:
+    """素材の保存先ごとの state.json。設定どおりなら共有の state.json、別の場所（試験）なら state_<sha1 先頭 8 桁>.json。
+    The state file per footage root: the shared state.json for the configured root, else state_<sha1[:8]>.json,
+    so production and test runs never share a job."""
+    resolved = Path(footage_root).resolve()
+    if resolved == Path(config_root).resolve():
+        return NIGHT_DIR / 'state.json'
+    return NIGHT_DIR / f'state_{hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]}.json'
+
+
+def reset_job(state: State, vod_id: str, day_dir: Path) -> dict:
+    """--force: job を作り直す。素材名は同じ日フォルダにあるときだけ引き継ぐ（前回の VOD を人の録画と取り違えない）。
+    --force: recreate the job, keeping the footage name only when it lives in the same day folder
+    (so the earlier download is not mistaken for a human recording)."""
+    old = state.jobs.pop(str(vod_id), None) or {}
+    job = state.job(str(vod_id))
+    if old.get('footage') and Path(old['footage']).parent.resolve() == Path(day_dir).resolve():
+        job['footage'] = old['footage']
+        job['footage_existing'] = old.get('footage_existing', False)
+    return job
 
 
 @dataclass
@@ -224,8 +247,6 @@ def _resolve_row(ctx: JobContext, job: dict) -> dict:
 def step_chat(ctx: JobContext, job: dict) -> None:
     """配信行を決め、チャット JSON を取り（描画に使う）、未取込ならサーバーへ送り、vod_offset_sec を合わせる。
     Resolve the stream row, download the chat JSON (needed for rendering), upload it when missing, set vod_offset_sec."""
-    exe = Path(ctx.night_cfg['twitch_downloader'])
-    td.ensure_installed(exe)
     row = _resolve_row(ctx, job)
     sid = str(row['stream_id'])
     job['stream_id'] = sid
@@ -234,6 +255,8 @@ def step_chat(ctx: JobContext, job: dict) -> None:
     cache.mkdir(parents=True, exist_ok=True)
     chat_json = cache / 'chat.json'
     if not chat_json.exists():
+        exe = Path(ctx.night_cfg['twitch_downloader'])
+        td.ensure_installed(exe)
         part = cache / 'chat.part.json'
         part.unlink(missing_ok=True)
         td.chatdownload(exe, vod_id, part)
@@ -254,7 +277,7 @@ def step_chat(ctx: JobContext, job: dict) -> None:
     if night_lib.should_apply_offset(current, computed):
         ctx.client.patch(f'/api/streams/{scout.seg(sid)}', {'vod_offset_sec': computed})
         log.info('vod_offset_sec を %+.1f 秒に設定', computed)
-    elif abs(computed) > 120:
+    elif current == 0 and abs(computed) > 120:
         job['offset_note'] = f'配信開始と VOD の差が {computed:+.0f} 秒あるため vod_offset_sec を自動設定していません'
         log.warning('%s', job['offset_note'])
     job['steps']['chat'] = 'done'
@@ -372,15 +395,18 @@ def step_plan(ctx: JobContext, job: dict) -> None:
 
 def _reason(e: BaseException) -> str:
     """例外を短い理由にする（トークンは api 側で例外に載らない）/ Short reason text for an exception."""
+    # 通知・Web に出すので日本語だけ: 「日本語 / English」の文言は前半を採る
+    # Shown in toasts and on the web, so Japanese only: take the half before ' / ' of our bilingual messages
     if isinstance(e, subprocess.CalledProcessError):
         cmd = e.cmd[0] if isinstance(e.cmd, (list, tuple)) else str(e.cmd)
         text = f'{Path(str(cmd)).name} が終了コード {e.returncode} で失敗'
     elif isinstance(e, api.ApiError):
         text = f'サーバー HTTP {e.status} {e.error}'
     elif isinstance(e, scout.ScoutExit):
-        text = str(e)
+        text = str(e).split(' / ')[0]
     else:
-        text = f'{type(e).__name__}: {e}'
+        message = str(e).split(' / ')[0]
+        text = f'エラー: {type(e).__name__}' + (f': {message}' if message else '')
     return text[:_REASON_MAX]
 
 
@@ -506,29 +532,24 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     try:
         night_cfg = load_night_config(args.config)
+        config_root = night_cfg['footage_root']
         if args.footage_root:
             night_cfg['footage_root'] = args.footage_root
         cfg_path = Path(args.config).resolve().parent / 'scout.config.json'
         cfg = scout.load_config(cfg_path)
         client = api.Client(cfg['server'], scout.read_token(Path(cfg['token_path'])))
-        state = State().load()
+        state = State(state_path_for(night_cfg['footage_root'], config_root)).load()
         vod = find_vod(night_cfg['channel'], args.vod)
     except (scout.ScoutExit, api.ApiError, ValueError, OSError) as e:
         log.error('起動できません: %s', _reason(e))
         return 2
-    if args.force:
-        old = state.jobs.pop(args.vod, None) or {}
-        job = state.job(args.vod)
-        # 素材名は 1 度だけ決める: 前回保存した VOD を人の録画と取り違えない
-        # The footage name is chosen once, so the earlier download is not mistaken for a human recording
-        for key in ('footage', 'footage_existing'):
-            if key in old:
-                job[key] = old[key]
-        state.save()
-    log.info('夜の処理を開始: VOD %s「%s」素材 %s', vod['id'], vod['title'], night_cfg['footage_root'])
+    log.info('夜の処理を開始: VOD %s「%s」素材 %s 状態 %s', vod['id'], vod['title'], night_cfg['footage_root'], state.path)
     ctx = JobContext(client=client, cfg=cfg, night_cfg=night_cfg, state=state, vod=vod, stream_row=None,
                      footage_root=Path(night_cfg['footage_root']), notify=notify,
                      status=lambda text: log.info('状態: %s', text), scout_config_path=cfg_path)
+    if args.force:
+        reset_job(state, args.vod, _day_dir(ctx))
+        state.save()
     job = run_job(ctx)
     return 0 if night_lib.next_step(job) is None else 1
 

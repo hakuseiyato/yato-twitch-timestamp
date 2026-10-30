@@ -1,5 +1,6 @@
 # night.py（夜の処理の段・状態・通知）のテスト。ネットワークと外部コマンドは差し替える
 # Tests for night.py (night-run steps, state, notify); network and external commands are mocked
+import hashlib
 import json
 import os
 import sys
@@ -9,7 +10,14 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# `python -m unittest scout.tests.…` は scout/ を名前空間パッケージとして先に読む。night には scout.py を読ませ、
+# 読んだ後でパッケージを戻す（unittest がパッケージから tests をたどるため）
+# The dotted invocation imports the scout/ directory as a namespace package first; night gets scout.py, then the
+# package is put back because unittest walks scout.tests from it
+_scout_pkg = sys.modules.pop('scout') if not hasattr(sys.modules.get('scout'), 'run') and 'scout' in sys.modules else None
 import night  # noqa: E402
+if _scout_pkg is not None:
+    sys.modules['scout'] = _scout_pkg
 import night_lib  # noqa: E402
 
 VOD = {'id': '2914625472', 'title': 'VALORANTやる', 'lengthSeconds': 5911,
@@ -123,7 +131,7 @@ class RunJobTest(Base):
         fakes = self._patch_steps(scout=failing)
         for attempt in (1, 2):
             result = night.run_job(self.ctx())
-            self.assertEqual(result['error'], {'step': 'scout', 'reason': 'RuntimeError: GPU が見つかりません',
+            self.assertEqual(result['error'], {'step': 'scout', 'reason': 'エラー: RuntimeError: GPU が見つかりません',
                                                'count': attempt})
             self.assertFalse(result.get('stopped'))
             self.notify.assert_not_called()
@@ -216,6 +224,67 @@ class StepChatTest(Base):
             'stream_id': 'vod-2914625472', 'channel': 'terano_naa', 'started_at': VOD['createdAt'],
             'title': VOD['title'], 'vod_id': VOD['id']})
         self.assertEqual(job['stream_id'], 'vod-2914625472')
+
+
+    def test_offset_note_only_when_unset(self):
+        # 人が設定済み（5 秒）なら差が大きくても書かない / no note when a person already set the offset
+        client = self._client(dict(ROW, started_at='2026-10-30T05:00:00Z', vod_offset_sec=5))
+        job = self.state.job(VOD['id'])
+        with mock.patch.object(night.td, 'ensure_installed'),                 mock.patch.object(night.td, 'chatdownload', side_effect=self._fake_download):
+            night.step_chat(self.ctx(client), job)
+        self.assertNotIn('offset_note', job)
+
+    def test_cached_chat_needs_no_cli(self):
+        self.chat_dir.mkdir(parents=True)
+        (self.chat_dir / 'chat.json').write_text(json.dumps(self.td_json), encoding='utf-8')
+        client = self._client(dict(ROW))
+        job = self.state.job(VOD['id'])
+        with mock.patch.object(night.td, 'ensure_installed', side_effect=RuntimeError('missing')) as ensure,                 mock.patch.object(night.td, 'chatdownload') as dl:
+            night.step_chat(self.ctx(client), job)
+        ensure.assert_not_called()
+        dl.assert_not_called()
+        self.assertEqual(job['steps']['chat'], 'done')
+
+
+class StatePathTest(unittest.TestCase):
+    def test_config_root_uses_shared_state(self):
+        self.assertEqual(night.state_path_for(r'D:\Work_HDD\Footage', r'D:\Work_HDD\Footage'),
+                         night.NIGHT_DIR / 'state.json')
+
+    def test_other_root_gets_its_own_state(self):
+        root = r'C:\Work\Yato\Claude\_scratch\night_test\寺乃なあ\Footage'
+        digest = hashlib.sha1(str(Path(root).resolve()).encode('utf-8')).hexdigest()[:8]
+        self.assertEqual(night.state_path_for(root, r'D:\Work_HDD\Footage'), night.NIGHT_DIR / f'state_{digest}.json')
+
+
+class ResetJobTest(Base):
+    def test_footage_kept_in_same_day_folder(self):
+        day = self.footage / '_261030'
+        old = self.state.job(VOD['id'])
+        old.update(footage=str(day / '261030_x.mp4'), footage_existing=False, stream_id='1')
+        old['steps']['vod'] = 'done'
+        job = night.reset_job(self.state, VOD['id'], day)
+        self.assertEqual(job['footage'], str(day / '261030_x.mp4'))
+        self.assertFalse(job['footage_existing'])
+        self.assertEqual(job['steps'], {})
+        self.assertNotIn('stream_id', job)
+
+    def test_footage_dropped_for_another_folder(self):
+        old = self.state.job(VOD['id'])
+        old.update(footage=str(self.tmp / 'other' / '_261030' / '261030_x.mp4'), footage_existing=True)
+        job = night.reset_job(self.state, VOD['id'], self.footage / '_261030')
+        self.assertNotIn('footage', job)
+        self.assertNotIn('footage_existing', job)
+
+
+class ReasonTest(unittest.TestCase):
+    def test_bilingual_message_keeps_japanese_half(self):
+        e = night.scout.ScoutExit(2, 'ERR: 配信が見つかりません / Stream not found: 1')
+        self.assertEqual(night._reason(e), 'ERR: 配信が見つかりません')
+
+    def test_plain_exception_is_japanese_labelled(self):
+        e = RuntimeError(r'TwitchDownloaderCLI が見つかりません: D:\x.exe / TwitchDownloaderCLI not found')
+        self.assertEqual(night._reason(e), r'エラー: RuntimeError: TwitchDownloaderCLI が見つかりません: D:\x.exe')
 
 
 class StepCaptionsTest(Base):
