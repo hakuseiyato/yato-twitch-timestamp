@@ -254,27 +254,27 @@ assert.notStrictEqual(r2.failed[0].at, 'old'); assert.strictEqual(prevFailed[0].
 assert.strictEqual(TSLib.isRetryableUpload(0), true); assert.strictEqual(TSLib.isRetryableUpload(503), true); assert.strictEqual(TSLib.isRetryableUpload(401), false); assert.strictEqual(TSLib.isRetryableUpload(413), false);
 assert.strictEqual(TSLib.isRetryableUpload(408), true); assert.strictEqual(TSLib.isRetryableUpload(429), true); assert.strictEqual(TSLib.isRetryableUpload(403), false);
 // 失敗理由の表示文言と記録ごとの送信状態（popup 用） / Failure reason text and per-record sync state (for the popup)
-assert.strictEqual(TSLib.reasonText('forbidden_tombstone'), "他の人の記録は消せません / cannot delete others' records");
-assert.strictEqual(TSLib.reasonText('forbidden_channel'), 'このチャンネルの会員ではありません / not a member of this channel');
+assert.strictEqual(TSLib.reasonText('forbidden_tombstone'), '他の人の記録は消せません');
+assert.strictEqual(TSLib.reasonText('forbidden_channel'), 'このチャンネルの会員ではありません');
 for (const code of ['invalid_id', 'invalid_offset', 'invalid_by', 'invalid_record']) {
-  assert.strictEqual(TSLib.reasonText(code), '記録の形式が不正です / invalid record', code);
+  assert.strictEqual(TSLib.reasonText(code), '記録の形式が不正です', code);
 }
-assert.strictEqual(TSLib.reasonText('invalid_time'), '時刻が不正です / invalid time');
-assert.strictEqual(TSLib.reasonText('missing_stream'), '配信情報がありません / stream missing');
-assert.strictEqual(TSLib.reasonText('permission_required'), 'サーバーへの送信が許可されていません / sending not allowed yet');
-assert.strictEqual(TSLib.reasonText('unauthorized'), 'ログインが必要です / login required');
-assert.strictEqual(TSLib.reasonText('login_required'), 'ログインが必要です / login required');
-assert.strictEqual(TSLib.reasonText('network'), '通信できませんでした / network error');
+assert.strictEqual(TSLib.reasonText('invalid_time'), '時刻が不正です');
+assert.strictEqual(TSLib.reasonText('missing_stream'), '配信情報がありません');
+assert.strictEqual(TSLib.reasonText('permission_required'), 'サーバーへの送信が許可されていません');
+assert.strictEqual(TSLib.reasonText('unauthorized'), 'ログインが必要です');
+assert.strictEqual(TSLib.reasonText('login_required'), 'ログインが必要です');
+assert.strictEqual(TSLib.reasonText('network'), '通信できませんでした');
 // 一時的な不調（5xx / 408 / 429）と、それ以外の 4xx / Temporary trouble (5xx / 408 / 429) and other 4xx
 for (const code of ['http_500', 'http_502', 'http_503', 'http_599', 'http_408', 'http_429']) {
-  assert.strictEqual(TSLib.reasonText(code), 'サーバーが一時的に応答しません / server temporarily unavailable', code);
+  assert.strictEqual(TSLib.reasonText(code), 'サーバーが一時的に応答しません', code);
 }
 for (const code of ['http_400', 'http_403', 'http_404', 'http_405', 'http_413']) {
-  assert.strictEqual(TSLib.reasonText(code), 'サーバーが要求を拒否しました (' + code + ') / server rejected the request (' + code + ')', code);
+  assert.strictEqual(TSLib.reasonText(code), 'サーバーが要求を拒否しました (' + code + ')', code);
 }
-assert.strictEqual(TSLib.reasonText('http_200'), 'サーバーの応答が不正です / unexpected server response');
-assert.strictEqual(TSLib.reasonText('http_302'), 'サーバーに届きませんでした (http_302) / server unreachable (http_302)');
-assert.strictEqual(TSLib.reasonText('internal'), '拡張の内部エラー / extension internal error');
+assert.strictEqual(TSLib.reasonText('http_200'), 'サーバーの応答が不正です');
+assert.strictEqual(TSLib.reasonText('http_302'), 'サーバーに届きませんでした (http_302)');
+assert.strictEqual(TSLib.reasonText('internal'), '拡張の内部エラー');
 assert.strictEqual(TSLib.reasonText('csrf'), 'csrf');
 assert.strictEqual(TSLib.reasonText('http_x'), 'http_x');
 assert.strictEqual(TSLib.reasonText(''), '');
@@ -1032,7 +1032,7 @@ assert.strictEqual(TSLib.frameFileName(5, 30, 'x'.repeat(80)), '00-00-05-00_' + 
   assert.strictEqual(TSLib.serverMirrorPath('/d/', 'https://h:8443/x', 'a b'), '/d/server/h_8443/a_b_sync.csv');
   // ドットだけの host はフォルダ移動になるので拒否 / A dots-only host would climb folders, so it is rejected
   ['https://.', 'https://..', 'https://...'].forEach((url) => {
-    assert.throws(() => TSLib.serverMirrorPath('/d', url, 's'), /ホスト名が不正です \/ invalid server host/);
+    assert.throws(() => TSLib.serverMirrorPath('/d', url, 's'), /: サーバー URL のホスト名が不正です$/);
   });
   const p = TSLib.recordsToPush([{ id: 'a', updated_at: '2026-01-02T00:00:00.000Z', offset_sec: 1, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }, { id: 'b', updated_at: '2026-01-01T00:00:00.000Z', offset_sec: 2, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }], '2026-01-01T12:00:00.000Z');
   assert.deepStrictEqual(p.map(r => r.id), ['a']); assert.strictEqual(p[0].timecode, '00:00:01');

@@ -83,7 +83,7 @@ async function testSaveSettingsServerUrl() {
   assert.strictEqual(state.serverPermission, false);
 
   // https 以外・パス付きは拒否 / Non-https and URLs with a path are rejected
-  const urlError = { message: 'サーバー URL は https://ホスト名 の形で入力してください / Server URL must be https://host' };
+  const urlError = { message: 'サーバー URL は https://ホスト名 の形で入力してください' };
   for (const bad of ['http://x', 'https://h/path', 'not a url', 'https://h/?q=1', 'https://h/#x']) {
     await assert.rejects(bg.handleMessage({ type: 'saveSettings', settings: { clientId: 'cid', lagSec: 5, serverUrl: bad } }), urlError, bad);
   }

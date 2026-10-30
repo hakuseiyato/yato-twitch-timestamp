@@ -4,7 +4,7 @@ importScripts('lib.js');
 
 // serverUrl が空ならサーバーへは送らない / An empty serverUrl means nothing is sent to the server
 const DEFAULT_SETTINGS = { clientId: '105fdov1w7trd0swseu50l5qy2sckg', lagSec: 5, serverUrl: '' };
-const SERVER_URL_ERROR = 'サーバー URL は https://ホスト名 の形で入力してください / Server URL must be https://host';
+const SERVER_URL_ERROR = 'サーバー URL は https://ホスト名 の形で入力してください';
 const streamCache = new Map();
 let storageChain = Promise.resolve();
 

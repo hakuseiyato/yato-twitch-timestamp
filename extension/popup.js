@@ -26,10 +26,10 @@
   };
   // 送信状態の印 / Sync state marks
   const SYNC_MARKS = {
-    sent: '送信済 / sent',
-    pending: '未送信 / pending',
-    failed: '失敗 / failed',
-    unsent: '未送信 / unsent'
+    sent: '送信済',
+    pending: '未送信',
+    failed: '失敗',
+    unsent: '未送信'
   };
   let currentState = null;
 
@@ -141,14 +141,14 @@
     if (!serverUrl) return;
     const pending = currentState.pending || [];
     const failed = currentState.failed || [];
-    elements.pendingCount.textContent = '未送信 ' + pending.length + ' 件 / pending ' + pending.length;
+    elements.pendingCount.textContent = '未送信 ' + pending.length + ' 件';
     const lastSync = currentState.lastSync;
     const at = lastSync && lastSync.at ? new Date(lastSync.at) : null;
     if (at && Number.isFinite(at.getTime())) {
       const time = pad2(at.getHours()) + ':' + pad2(at.getMinutes());
-      elements.lastSync.textContent = '最終同期 ' + time + '（成功 ' + lastSync.accepted + '）/ last sync ' + time + ' (accepted ' + lastSync.accepted + ')';
+      elements.lastSync.textContent = '最終同期 ' + time + '（成功 ' + lastSync.accepted + '）';
     } else {
-      elements.lastSync.textContent = '最終同期 なし / last sync: never';
+      elements.lastSync.textContent = '最終同期 なし';
     }
     const error = lastSync && lastSync.error ? TSLib.reasonText(lastSync.error) : '';
     elements.syncError.textContent = error;
@@ -156,7 +156,7 @@
 
     // 失敗一覧: id の下 4 桁・タイムコード・理由 / Failure list: last 4 chars of the id, timecode, reason
     elements.failedDetails.hidden = !failed.length;
-    elements.failedSummary.textContent = '失敗 ' + failed.length + ' 件 / failed ' + failed.length;
+    elements.failedSummary.textContent = '失敗 ' + failed.length + ' 件';
     elements.failedList.replaceChildren();
     const byId = new Map(TSLib.mergeRecords(currentState.records).map(function (record) { return [record.id, record]; }));
     failed.forEach(function (entry) {
@@ -216,7 +216,7 @@
       const result = await send({ type: 'syncNow' });
       await loadState();
       if (result.error) setStatus(TSLib.reasonText(result.error), true);
-      else setStatus('同期しました（成功 ' + result.accepted + '）/ Synced (accepted ' + result.accepted + ')', false);
+      else setStatus('同期しました（成功 ' + result.accepted + '）', false);
     } finally {
       elements.syncNow.disabled = false;
     }
@@ -230,7 +230,7 @@
     try {
       await send({ type: 'clearFailed' });
       await loadState();
-      setStatus('失敗一覧を消しました / Cleared the failures', false);
+      setStatus('失敗一覧を消しました', false);
     } catch (error) {
       setStatus(error.message, true);
     }
@@ -245,10 +245,10 @@
       const granted = await chrome.permissions.request({ origins: [serverUrl + '/*'] });
       await loadState();
       if (!granted) {
-        setStatus('サーバーへの送信は許可されませんでした / Sending to the server was not allowed', true);
+        setStatus('サーバーへの送信は許可されませんでした', true);
         return;
       }
-      setStatus('サーバーへの送信を許可しました / Sending to the server is allowed', false);
+      setStatus('サーバーへの送信を許可しました', false);
       // 許可されたらすぐ送る / Send right away once allowed
       await syncNow();
     } catch (error) {

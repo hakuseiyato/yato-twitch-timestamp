@@ -464,28 +464,28 @@ const TSLib = (function () {
   // 送信の失敗理由コードを表示用の文言にする。知らないコードはそのまま
   // Turns an upload failure code into display text; unknown codes are shown as is.
   const REASON_TEXT = {
-    forbidden_tombstone: "他の人の記録は消せません / cannot delete others' records",
-    forbidden_channel: 'このチャンネルの会員ではありません / not a member of this channel',
-    missing_stream: '配信情報がありません / stream missing',
-    invalid_time: '時刻が不正です / invalid time',
-    permission_required: 'サーバーへの送信が許可されていません / sending not allowed yet',
-    unauthorized: 'ログインが必要です / login required',
-    login_required: 'ログインが必要です / login required',
-    network: '通信できませんでした / network error',
+    forbidden_tombstone: '他の人の記録は消せません',
+    forbidden_channel: 'このチャンネルの会員ではありません',
+    missing_stream: '配信情報がありません',
+    invalid_time: '時刻が不正です',
+    permission_required: 'サーバーへの送信が許可されていません',
+    unauthorized: 'ログインが必要です',
+    login_required: 'ログインが必要です',
+    network: '通信できませんでした',
     // 200 だが本文が accepted / rejected の形でない / A 200 whose body lacks accepted / rejected
-    http_200: 'サーバーの応答が不正です / unexpected server response',
-    internal: '拡張の内部エラー / extension internal error'
+    http_200: 'サーバーの応答が不正です',
+    internal: '拡張の内部エラー'
   };
 
   function reasonText(code) {
     const text = code === undefined || code === null ? '' : String(code);
     if (Object.prototype.hasOwnProperty.call(REASON_TEXT, text)) return REASON_TEXT[text];
-    if (/^invalid_/.test(text)) return '記録の形式が不正です / invalid record';
+    if (/^invalid_/.test(text)) return '記録の形式が不正です';
     // 5xx / 408 / 429 は一時的、それ以外の 4xx は拒否、残りは届かない
     // 5xx / 408 / 429 are temporary, other 4xx are rejections, anything else did not arrive.
-    if (/^http_(5\d\d|408|429)$/.test(text)) return 'サーバーが一時的に応答しません / server temporarily unavailable';
-    if (/^http_4\d\d$/.test(text)) return 'サーバーが要求を拒否しました (' + text + ') / server rejected the request (' + text + ')';
-    if (/^http_\d+$/.test(text)) return 'サーバーに届きませんでした (' + text + ') / server unreachable (' + text + ')';
+    if (/^http_(5\d\d|408|429)$/.test(text)) return 'サーバーが一時的に応答しません';
+    if (/^http_4\d\d$/.test(text)) return 'サーバーが要求を拒否しました (' + text + ')';
+    if (/^http_\d+$/.test(text)) return 'サーバーに届きませんでした (' + text + ')';
     return text;
   }
 
@@ -537,7 +537,7 @@ const TSLib = (function () {
     const base = String(baseDir || '').replace(/[\\/]+$/, '');
     const host = new URL(serverUrl).host.replace(/[^A-Za-z0-9_.-]/g, '_');
     // . や .. のフォルダ名はフォルダ移動になる / Folder names like . or .. would move between folders
-    if (/^\.+$/.test(host)) throw new Error('サーバー URL のホスト名が不正です / invalid server host');
+    if (/^\.+$/.test(host)) throw new Error('サーバー URL のホスト名が不正です');
     const safeId = String(streamId || '').replace(/[^A-Za-z0-9_.-]/g, '_');
     return base + '/server/' + host + '/' + safeId + '_sync.csv';
   }

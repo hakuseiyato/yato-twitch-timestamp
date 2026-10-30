@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Peakaboo",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1uw4jQxPAi9ftpwH/uEcLyfG+xIdG7AqnkUAoEF6zW6+jyGFD6nSBfcTn9U9x/0qjqXlK8zBwdqTeEVvo82gc75YZXcysEB4BB+aMZMyPSBxSKdLviDA6y+tq2oqwKpY4FGvgKg70uTcQyUEUtxW6ilSoZmx+I/YLMWMa5rl8GaoGfkod8kG7OqplrjUk5VVtLgb/iD1n7G1WE0lFzD73P30rvSUldaS1dIWeHdngpVDgIqgdIgmJqNzt4Y6lDgY7egaKYGjdN2asWjMGtcDPAFsWwJo9iGL6sPQIYqr+A/wUU+FGrB5bslt9pEjvegxsHweAR4bcdzgtIF5rP0wSwIDAQAB",
   "permissions": [
     "identity",
@@ -51,7 +51,7 @@
       "description": "タイムスタンプを押す"
     }
   },
-  "description": "Twitch 配信のタイムスタンプを押し、切り抜きの当たりをチームで共有する / Stamp Twitch streams and share clip candidates with your team",
+  "description": "Twitch 配信のタイムスタンプを押し、切り抜きの当たりをチームで共有する",
   "icons": {
     "16": "icons/peakaboo-16.png",
     "32": "icons/peakaboo-32.png",

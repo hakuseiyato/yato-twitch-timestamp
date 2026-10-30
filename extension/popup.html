@@ -13,7 +13,7 @@
       <span id="auth-status">未ログイン</span>
       <button id="auth-button" type="button">ログイン</button>
     </div>
-    <p id="relogin" class="warn" hidden>トークンが切れました。再ログインしてください / Token expired. Log in again</p>
+    <p id="relogin" class="warn" hidden>トークンが切れました。再ログインしてください</p>
   </header>
 
   <section aria-labelledby="settings-title">
@@ -22,17 +22,17 @@
     <div class="number-row">
       <label>遅延（秒）<input id="lag-sec" type="number" min="0" step="0.1"></label>
     </div>
-    <label>サーバー URL / Server URL<input id="server-url" type="url" autocomplete="off" placeholder="https://yato-twitch-timestamp.hakuseiyato.workers.dev"></label>
-    <button id="grant-host" type="button" class="secondary" hidden>このサーバーへの送信を許可 / Allow sending to this server</button>
+    <label>サーバー URL<input id="server-url" type="url" autocomplete="off" placeholder="https://yato-twitch-timestamp.hakuseiyato.workers.dev"></label>
+    <button id="grant-host" type="button" class="secondary" hidden>このサーバーへの送信を許可</button>
     <button id="save-settings" type="button">保存</button>
     <p class="hint">Redirect URL: <code id="redirect-url"></code></p>
     <p class="hint">Twitch 開発者コンソールの OAuth Redirect URL に登録してください</p>
   </section>
 
   <section id="sync-section" aria-labelledby="sync-title" hidden>
-    <h2 id="sync-title">サーバー同期 / Server sync</h2>
+    <h2 id="sync-title">サーバー同期</h2>
     <div class="sync-row">
-      <button id="sync-now" type="button">サーバーと同期 / Sync with server</button>
+      <button id="sync-now" type="button">サーバーと同期</button>
       <span id="pending-count"></span>
     </div>
     <p id="last-sync" class="hint"></p>
@@ -40,7 +40,7 @@
     <details id="failed-details" hidden>
       <summary id="failed-summary"></summary>
       <div id="failed-list"></div>
-      <button id="clear-failed" type="button" class="secondary">失敗一覧を消す / Clear failures</button>
+      <button id="clear-failed" type="button" class="secondary">失敗一覧を消す</button>
     </details>
   </section>
 
