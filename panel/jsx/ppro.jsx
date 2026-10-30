@@ -956,13 +956,13 @@ function ytsFindSequence(sequenceId, name) {
 // 素材パスが同じ既存の項目（無ければ null）。Windows のパスは大文字小文字を区別しない
 // An existing project item with the same media path (null when none). Windows paths compare case-insensitively.
 function ytsFindItemByMediaPath(path) {
-    var native = new File(path).fsName;
-    var want = native.toLowerCase();
+    var fsPath = new File(path).fsName;
+    var want = fsPath.toLowerCase();
     var items;
     var count;
     var i;
     // API が無い・失敗する版では null（呼び出し側が bin 直下を探す）/ null when the API is missing or fails (callers also scan the bin)
-    try { items = app.project.rootItem.findItemsMatchingMediaPath(native, 1); } catch (findError) { return null; }
+    try { items = app.project.rootItem.findItemsMatchingMediaPath(fsPath, 1); } catch (findError) { return null; }
     if (!items) return null;
     count = Number(items.length || items.numItems || 0);
     for (i = 0; i < count; i += 1) {
