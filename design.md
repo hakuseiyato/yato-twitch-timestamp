@@ -86,11 +86,14 @@
 | 候補 | `.chip` | 枠と文字が `--cand`、地 `--cand-soft`、11px / 600。色だけに頼らず「候補」と書く |
 | 注記 | `.note` | 左 3px の青線。1 回だけ見せるトークンなど |
 | インライン値 | `.inline` | 破線の下線。クリックで入力に変わる |
-| 一覧 | `ul.rows`（`li.hi`/`li.in-bin` `li.cand`/`li.candidate` `li.human` `.t` `.u` `.by` `.x`）、`ul.rows.st` | 時刻（等幅）/ 名前 / 本文。候補は左 3px 紫、人は左 3px 琥珀 |
-| 配信ページ | `.meta` `.gwrap` `.graph` `.selrow` `.lists` `.tabs` | `.lists` は 1100px 以上で 3:2 の横並び、未満は 1 列 + タブ |
+| 一覧 | `ul.rows`（`li.in-bin` `li.flash` `li.cand` `li.human` `.t` `.u` `.by` `.x`）、`ul.rows.st` | 時刻（等幅）/ 名前 / 本文。候補は左 3px 紫、人は左 3px 琥珀。選択範囲は `--sel` の地、別ウィンドウの点滅は地 + 左 3px 青 |
+| スタンプの削除 | `ul.rows .x` | 行の右端の × は本物の `<button>`（枠・地なしの文字だけ、`--ink-3`、hover で `--err`）。書いた本人とチャンネルの owner にだけ出し、確認してから消す。タッチでは当たり判定だけ 44px |
+| 配信一覧 | `.streams`（`tr.is-new` `.t a.untitled` `td.num`） | 表。行のどこを押してもタイトルのリンクへ（index.js の tbody への click 委譲）。登録直後の行は `--sel` の地 + 左 3px 青 |
+| 会員表 | `.members` | 管理ページの表。5 列 + 追加フォームを 680px に収めるため左右の余白を 10px に詰め、login は折り返さない（収まらなければ面の中で横スクロール） |
+| 配信ページ | `.meta` `.gwrap` `.graph` `.selrow` `.lists` `.tabs` | `.lists` は 1100px 以上で 3:2 の横並び（`.tabs` は隠れ、両パネルが見える。パネルは `role="tabpanel"` を外す）、未満は 1 列 + タブ（選んでいないパネルの列は見出しごと畳む）。切り替えは stream.js の `syncLayout()` |
 | アイコン | `svg.i` | 線画 1 系統、線幅 1.75、14px。絵文字は使わない |
 
-JS が付けるクラス名（`in-bin` `flash` `is-new` `candidate` `stream-row` `stream-grid` `invalid`、タブの `aria-selected`）は契約なので名前を変えない。
+JS が付けるクラス名（`in-bin` `flash` `is-new` `cand` `candidate` `human` `invalid` `untitled` `on`、状態行の `ok` / `error`、タブの `aria-selected`）は契約なので名前を変えない。
 
 ## CTA voice
 
@@ -113,3 +116,4 @@ JS が付けるクラス名（`in-bin` `flash` `is-new` `candidate` `stream-row`
 ## 改訂履歴
 
 - 2026-10-30 初版（設計書 §4 から転記。コントラスト基準に合わせて `--ink-2`（明）`--ink-3` `--accent`（明）`--accent-fill` `--ok`（明）`--warn`（明）`--bar-top`（明）`--bar-hover`（明）`--focus`（明）を調整）
+- 2026-10-30 仕上げ: 旧クラス（`.card` `.row-list` `.stream-row` `.stream-grid` `.site-nav` ほか）と旧トークンのエイリアスを削除。部品表に `.streams` `.members` スタンプの削除を足し、`.lists` / `.tabs` の切り替えを明記。`.btn.danger` の hover は枠を赤くしない
