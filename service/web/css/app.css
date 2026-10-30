@@ -47,7 +47,8 @@
   /* 字体 / Fonts */
   --font-body: Inter, "Noto Sans JP", system-ui, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
-  /* 大きさ: 余白 4px 刻み、角丸は面 8px・操作 6px / Sizes: 4px spacing, radius 8px for surfaces and 6px for controls */
+  /* 大きさ: 余白は 4px 刻みが目標（今は試作 v2 の値が正で 38 か所が外れる。丸めは別作業）、角丸は面 8px・操作 6px
+     Sizes: a 4px spacing grid is the goal (prototype v2 values are authoritative for now; 38 off-grid declarations; rounding is a separate pass); radius 8px for surfaces and 6px for controls */
   --control-h: 36px;
   --radius: 6px;
   --radius-lg: 8px;
@@ -154,10 +155,11 @@ button:hover:not(:disabled), .btn:hover { background: var(--paper-4); text-decor
 .btn.pri { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); box-shadow: var(--shadow-edge), var(--shine); }
 .btn.pri:hover { background: var(--accent-fill); filter: brightness(0.92); }
 .btn.ghost { border-color: transparent; background: none; color: var(--ink-2); box-shadow: none; }
-.btn.ghost:hover { background: var(--paper-3); color: var(--ink); }
+/* 削除の ghost は除く（無効のときも --err のまま）/ Danger ghosts are excluded (they keep --err even when disabled) */
+.btn.ghost:not(.danger):hover { background: var(--paper-3); color: var(--ink); }
 .btn.danger { color: var(--err); }
-/* 削除の hover は --paper-3 の地で 4.5:1 を保つ（--paper-4 だと明るい地で割る）。.btn.ghost:hover より後に置く。枠は赤くしない（ghost の枠なしを保つ）
-   Danger hover stays on --paper-3 to keep 4.5:1 (--paper-4 falls short in the light theme); must follow .btn.ghost:hover. No red border (ghost stays borderless) */
+/* 削除の hover は --paper-3 の地で 4.5:1 を保つ（--paper-4 だと明るい地で割る）。ghost の hover より後に置く。枠は赤くしない（ghost の枠なしを保つ）
+   Danger hover stays on --paper-3 to keep 4.5:1 (--paper-4 falls short in the light theme); must follow the ghost hover. No red border (ghost stays borderless) */
 .btn.danger:hover:not(:disabled) { background: var(--paper-3); color: var(--err); }
 /* 文字だけのボタン（リンクの見た目。配信ページのメタ行の「再取り込み」「別ウィンドウ」）
    Text-only button that looks like a link (re-import and pop-out in the stream page's meta line) */

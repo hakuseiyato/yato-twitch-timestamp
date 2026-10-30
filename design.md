@@ -64,7 +64,7 @@
 
 ## Spacing と形
 
-- 余白は 4px 刻み
+- 余白は 4px 刻みを目標にする。現状は試作 v2 の値が正で、38 か所が 4px 刻みから外れる。一括で丸めるのは別作業
 - 角丸: 面 8px（`--radius-lg`）、ボタン・入力 6px（`--radius`）、チップ 999px
 - 操作の高さ `--control-h`: 36px、`@media (pointer: coarse)` で 44px
 
@@ -87,7 +87,7 @@
 | 注記 | `.note` | 左 3px の青線。1 回だけ見せるトークンなど |
 | インライン値 | `.inline` | 破線の下線。クリックで入力に変わる |
 | 一覧 | `ul.rows`（`li.in-bin` `li.flash` `li.cand` `li.human` `.t` `.u` `.by` `.x`）、`ul.rows.st` | 時刻（等幅）/ 名前 / 本文。候補は左 3px 紫、人は左 3px 琥珀。選択範囲は `--sel` の地、別ウィンドウの点滅は地 + 左 3px 青 |
-| スタンプの削除 | `ul.rows .x` | 行の右端の × は本物の `<button>`（枠・地なしの文字だけ、`--ink-3`、hover で `--err`）。書いた本人とチャンネルの owner にだけ出し、確認してから消す。タッチでは当たり判定だけ 44px |
+| スタンプの削除 | `ul.rows .x` | 行の右端の × は本物の `<button>`（枠・地なしの文字だけ、`--ink-3`、hover で `--err`）。書いた本人・チャンネルの owner・サイト管理者にだけ出し、確認してから消す。タッチでは当たり判定だけ 44px |
 | 配信一覧 | `.streams`（`tr.is-new` `.t a.untitled` `td.num`） | 表。行のどこを押してもタイトルのリンクへ（index.js の tbody への click 委譲）。登録直後の行は `--sel` の地 + 左 3px 青 |
 | 会員表 | `.members` | 管理ページの表。5 列 + 追加フォームを 680px に収めるため左右の余白を 10px に詰め、login は折り返さない（収まらなければ面の中で横スクロール） |
 | 配信ページ | `.meta` `.gwrap` `.graph` `.selrow` `.lists` `.tabs` | `.lists` は 1100px 以上で 3:2 の横並び（`.tabs` は隠れ、両パネルが見える。パネルは `role="tabpanel"` を外す）、未満は 1 列 + タブ（選んでいないパネルの列は見出しごと畳む）。切り替えは stream.js の `syncLayout()` |

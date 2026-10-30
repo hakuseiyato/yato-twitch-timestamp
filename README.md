@@ -59,8 +59,8 @@ The extension can send every stamp to the cloud service (`service/`) as well as 
 Setup:
 
 1. Keep the Client ID as prefilled (the Worker accepts only tokens issued for its own Twitch application) and keep the Redirect URL registered as in [Setup](#setup); nothing changes there.
-2. Enter the server origin in "サーバー URL / Server URL", for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` or `https://host:port` is accepted (no path, query, or fragment).
-3. Click "このサーバーへの送信を許可 / Allow sending to this server" and accept Chrome's prompt. The extension declares the server only as an optional host permission, so Chrome blocks requests to it until you grant it for that origin. Once granted, the popup syncs immediately.
+2. Enter the server origin in "サーバー URL" (server URL), for example `https://yato-twitch-timestamp.hakuseiyato.workers.dev`, and click "保存". Only `https://host` or `https://host:port` is accepted (no path, query, or fragment).
+3. Click "このサーバーへの送信を許可" (allow sending to this server) and accept Chrome's prompt. The extension declares the server only as an optional host permission, so Chrome blocks requests to it until you grant it for that origin. Once granted, the popup syncs immediately.
 4. Make sure you are logged in. The Worker checks the Twitch token and accepts stamps only for channels where your Twitch login is a member (`/admin`).
 
 Saving a different server URL queues every local record (tombstones included) for the new server and forgets which records the previous server had received or rejected.
@@ -69,24 +69,24 @@ Behavior:
 
 - Stamping, editing a memo, importing a CSV, and deleting an individual record each queue the affected record and upload it right away with `POST /api/stamps`. A deleted record is sent as a tombstone (`deleted: true`); the server accepts tombstones only for your own records.
 - "配信ごとの削除" (the stream-level "削除" button) is local only. It removes the stream's records from this browser and from the upload queue and sends nothing, so the stream stays on the server.
-- Records that could not be sent (offline, server error, expired login) stay in the queue. The extension retries the queue every five minutes and after the next login. "サーバーと同期 / Sync with server" queues every local record, tombstones included, and sends them now.
+- Records that could not be sent (offline, server error, expired login) stay in the queue. The extension retries the queue every five minutes and after the next login. "サーバーと同期" (sync with server) queues every local record, tombstones included, and sends them now.
 - The popup shows "送信待ち n 件" (pending n), "最終同期 HH:mm（成功 n）" (last sync) with the number of accepted records, and, per record, a mark next to "ネイティブ" / "ローカル": "送信済" (sent: the current server accepted it), "送信待ち" (pending: queued), "失敗" (failed: rejected), or "未送信" (unsent: never sent to the current server, for example after "失敗一覧を消す"; "サーバーと同期" sends it).
 - A record the server reports as `stale` is already stored there in the same or a newer version. It counts as sent and is not retried.
 
 Reading failures:
 
-- Records the server rejects one by one appear in the collapsible "失敗 n 件 / failed n" list with the last four characters of the id, the timecode, and the reason. They are not retried automatically; "失敗一覧を消す / Clear failures" empties the list, and "サーバーと同期" sends them again after you fix the cause.
-  - "他の人の記録は消せません / cannot delete others' records" (`forbidden_tombstone`): only the author (or a channel owner on the web) can delete a record on the server. It stays deleted locally.
-  - "このチャンネルの会員ではありません / not a member of this channel" (`forbidden_channel`): ask a channel owner to add your Twitch login in `/admin`.
-  - "記録の形式が不正です / invalid record" (`invalid_*`), "時刻が不正です / invalid time" (`invalid_time`), "配信情報がありません / stream missing" (`missing_stream`): the record itself is broken, typically from an edited CSV.
+- Records the server rejects one by one appear in the collapsible "失敗 n 件" (failed n) list with the last four characters of the id, the timecode, and the reason. They are not retried automatically; "失敗一覧を消す" (clear failures) empties the list, and "サーバーと同期" sends them again after you fix the cause.
+  - "他の人の記録は消せません" (cannot delete others' records, `forbidden_tombstone`): only the author (or, on the web, a channel owner or a site admin) can delete a record on the server. It stays deleted locally.
+  - "このチャンネルの会員ではありません" (not a member of this channel, `forbidden_channel`): ask a channel owner to add your Twitch login in `/admin`.
+  - "記録の形式が不正です" (invalid record, `invalid_*`), "時刻が不正です" (invalid time, `invalid_time`), "配信情報がありません" (stream missing, `missing_stream`): the record itself is broken, typically from an edited CSV.
 - Errors that stop the whole upload are shown under the last sync line, and the records stay pending:
-  - "サーバーが要求を拒否しました (http_404) / server rejected the request (http_404)" or another 4xx status: usually a wrong server URL.
-  - "サーバーが一時的に応答しません / server temporarily unavailable" (5xx, 408, 429) or "通信できませんでした / network error" (offline): the five-minute retry sends them later.
+  - "サーバーが要求を拒否しました (http_404)" (server rejected the request) or another 4xx status: usually a wrong server URL.
+  - "サーバーが一時的に応答しません" (server temporarily unavailable: 5xx, 408, 429) or "通信できませんでした" (network error: offline): the five-minute retry sends them later.
   - A code the server names itself, such as `twitch_unavailable` (Twitch is down) or `csrf`, is shown as is.
-  - "拡張の内部エラー / extension internal error": an unexpected error inside the extension; reload it from `chrome://extensions`.
-  - "サーバーへの送信が許可されていません / sending not allowed yet": grant the host permission (step 3).
-  - "ログインが必要です / login required": log in again (see below).
-- Twitch login tokens from the implicit grant expire after about four hours. When the server answers 401, or when the extension finds the token expired while stamping, the popup shows "トークンが切れました。再ログインしてください / Token expired. Log in again". Click "ログイン"; the queued records are sent after the login. Stamps keep being saved locally in the meantime.
+  - "拡張の内部エラー" (extension internal error): an unexpected error inside the extension; reload it from `chrome://extensions`.
+  - "サーバーへの送信が許可されていません" (sending not allowed yet): grant the host permission (step 3).
+  - "ログインが必要です" (login required): log in again (see below).
+- Twitch login tokens from the implicit grant expire after about four hours. When the server answers 401, or when the extension finds the token expired while stamping, the popup shows "トークンが切れました。再ログインしてください" (token expired; log in again). Click "ログイン"; the queued records are sent after the login. Stamps keep being saved locally in the meantime.
 
 ## Scout（候補検知） / Scout (highlight candidates)
 
@@ -135,7 +135,7 @@ How candidates are chosen:
 
 Where candidates appear:
 
-- **Web (`/s/<id>`)**: candidates are violet vertical lines on the graph (human stamps stay amber). In the stamp list they have a violet left border, a "候補" badge, and the memo without its prefix. "候補を先に / Candidates first" lists them before the other stamps. Delete a wrong candidate as usual; the author or a channel owner can delete it.
+- **Web (`/s/<id>`)**: candidates are violet vertical lines on the graph (human stamps stay amber). In the stamp list they have a violet left border, a "候補" badge, and the memo without its prefix. "候補を先に" (candidates first) lists them before the other stamps. Delete a wrong candidate as usual; its author, a channel owner, or a site admin can delete it.
 - **Premiere Pro panel**: candidate markers that "同期" creates are yellow. Sync colours only the markers it creates; markers already in the sequence keep their colour. Yellow is reserved for candidates, so new human markers cycle through the other colors.
 
 Creating Short sequences (Premiere Pro only):
@@ -225,7 +225,7 @@ What "同期" does with a server stream:
 
 - **Pull first.** It fetches all of the stream's stamps (tombstones included) and merges them into the mirror CSV by `id` (the later `updated_at` wins), then calculates the differences as usual. The log shows "サーバーから n 件取り込み / pulled n". If the server cannot be reached or refuses (401, 403, network), the sync stops with "サーバーから取り込めないため同期を中止しました / Sync stopped: could not pull from the server: …", because syncing with stale local data would misjudge conflicts.
 - **Push after.** Once the sync has written the mirror CSV, the records changed since the last push are sent with `POST /api/stamps` (`source: 'panel'`, 500 per request): "サーバーへ n 件送信 / pushed n". Records exactly as the server returned them on the pull are not sent back. The last-push time is the moment the push started, so an edit made during a push is sent next time. If a request fails (network, 5xx, 401, …), the last-push time does not move: "サーバーへの送信は次回に再試行 / push will retry: …", and the next "同期" sends everything changed since the previous successful push. The markers and the mirror CSV are already synchronized at that point.
-- **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason> / failed n" with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません / cannot delete others' records"), you deleted a marker recorded by someone else; only its author (or a channel owner on the web) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
+- **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason> / failed n" with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません / cannot delete others' records"), you deleted a marker recorded by someone else; only its author (or, on the web, a channel owner or a site admin) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
 - **Recorder.** Records created by the panel ("＋追加", and markers picked up by "同期") get your Twitch login from `/api/me` as `by` instead of `premiere` / `ae`.
 
 Limits:
@@ -287,7 +287,7 @@ The panel uses a copy of `extension/lib.js` at `panel/js/lib.js` (CEP resolves r
 
 ## Cloud service (`service/`)
 
-`service/` is a single Cloudflare Worker deployed to the owner's personal Cloudflare account on the Free plan. The Worker serves the JSON API under `/api/` and the static pages in `service/web/`. D1 stores channels, members, streams, stamps, sessions, and panel tokens; R2 stores one chat JSON file per VOD. Users sign in with Twitch through the same Twitch application (redirect `https://<worker-host>/auth/callback`), and only members of a channel can see its streams. `/` lists the streams of the user's channels and registers a stream from a VOD URL ("VOD から登録"). `/s/<stream_id>` is the stream page: a comment-density graph (15, 30, 60, or 120 second bins, with stamp positions drawn as vertical lines), the "コメント" and "スタンプ" lists side by side at 1100 px and wider (tabs below that), the stamp list's "×" to delete a stamp (shown only to its author and to the channel's owners; it asks for confirmation and deletes it on the server as a tombstone), "コメントを別ウィンドウで" to detach the comment list to `/s/<stream_id>/comments` (it follows the graph through `BroadcastChannel`), and "ここに印" to add a stamp, recorded as the signed-in user, at the start of the selected bin. "取り込む" (next to "チャット" in the meta line; "再取り込み" once imported) makes the browser fetch the VOD's chat replay directly from Twitch GraphQL and upload it to the Worker once; the Worker stores the body in R2 without parsing it, and importing again overwrites it. Comment times are shifted by the stream's "VOD のずれ" and "反応の遅れ" (default five seconds) settings. `/me` issues panel tokens and `/admin` creates channels and manages members.
+`service/` is a single Cloudflare Worker deployed to the owner's personal Cloudflare account on the Free plan. The Worker serves the JSON API under `/api/` and the static pages in `service/web/`. D1 stores channels, members, streams, stamps, sessions, and panel tokens; R2 stores one chat JSON file per VOD. Users sign in with Twitch through the same Twitch application (redirect `https://<worker-host>/auth/callback`), and only members of a channel can see its streams. `/` lists the streams of the user's channels and registers a stream from a VOD URL ("VOD から登録"). `/s/<stream_id>` is the stream page: a comment-density graph (15, 30, 60, or 120 second bins, with stamp positions drawn as vertical lines), the "コメント" and "スタンプ" lists side by side at 1100 px and wider (tabs below that), the stamp list's "×" to delete a stamp (shown only to its author, the channel's owners, and site admins; it asks for confirmation and deletes it on the server as a tombstone), "コメントを別ウィンドウで" to detach the comment list to `/s/<stream_id>/comments` (it follows the graph through `BroadcastChannel`), and "ここに印" to add a stamp, recorded as the signed-in user, at the start of the selected bin. "取り込む" (next to "チャット" in the meta line; "再取り込み" once imported) makes the browser fetch the VOD's chat replay directly from Twitch GraphQL and upload it to the Worker once; the Worker stores the body in R2 without parsing it, and importing again overwrites it. Comment times are shifted by the stream's "VOD のずれ" and "反応の遅れ" (default five seconds) settings. `/me` issues panel tokens and `/admin` creates channels and manages members.
 
 The Chrome extension sends stamps to the service when a server URL is set (see [Server sync](#サーバーと同期--server-sync)). The Adobe panel can use a service stream as its sync source through a mirror CSV (see [サーバー / Server](#サーバー--server)); the CSV sync file workflow above is unchanged.
 
