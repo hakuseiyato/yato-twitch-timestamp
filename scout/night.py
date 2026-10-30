@@ -718,7 +718,10 @@ def _handle_request(ctx: LoopContext, row: dict, snapshot: Callable[[], dict]) -
     vod_id = str(vod['id'])
     old = ctx.state.jobs.get(vod_id)
     if old is not None and (old.get('stopped') or night_lib.next_step(old) is None):
-        finished = not old.get('stopped') and not old.get('error')
+        # 済んだ段を引き継ぐのは、要求された行が前回と同じ配信行のときだけ（別の行なら読むスタンプが変わる）
+        # Done steps carry over only when the requesting row is the same stream row as before (a different row changes the stamps read)
+        finished = (not old.get('stopped') and not old.get('error')
+                    and old.get('stream_id') == row.get('stream_id'))
         reset_job(ctx.state, vod_id, Path(ctx.footage_root) / f'_{night_lib.date_tag_jst(vod["createdAt"])}',
                   keep_steps=_KEEP_ON_RERUN if finished else ())
     _start_job(ctx, vod, row)
