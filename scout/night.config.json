@@ -1,0 +1,9 @@
+{
+  "channel": "terano_naa",
+  "footage_root": "D:\\Work_HDD\\寺乃なあ\\Footage",
+  "twitch_downloader": "D:\\Tools\\TwitchDownloader\\TwitchDownloaderCLI.exe",
+  "pre_sec": 15, "post_sec": 45,
+  "chat_render": { "width": 400, "height": 1080, "font_size": 24, "background": "#00000000" },
+  "caption_line_chars": 20,
+  "poll_minutes": 10
+}
