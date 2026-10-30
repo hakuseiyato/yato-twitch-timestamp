@@ -5,7 +5,9 @@
 // fetch と localStorage は globalThis から取る。テストは configure で差し替える
 // fetch and localStorage come from globalThis; tests replace them through configure.
 const YTSServer = (function () {
-  const lib = typeof TSLib !== 'undefined' ? TSLib : require('./lib.js');
+  // CEP（require 無し）で lib.js が読めなくても、読み込み時には throw しない（main.js が案内を出せるように）
+  // With lib.js missing in CEP (no require), do not throw at load time so main.js can show its notice.
+  const lib = typeof TSLib !== 'undefined' ? TSLib : (typeof require === 'function' ? require('./lib.js') : null);
   const SETTINGS_KEY = 'yts.server';
   const MAX_PER_REQUEST = 500;
   const overrides = { fetch: null, storage: null };
@@ -45,8 +47,15 @@ const YTSServer = (function () {
     }
   }
 
-  // URL は origin（https://host[:port]）にそろえて保存する / Saves the URL normalized to its origin (https://host[:port])
-  function saveSettings(settings) {
+  // lib が要る関数で呼ぶ。読めていなければ日英の Error / Called by functions that need lib; throws a bilingual Error when it is missing
+  function requireLib() {
+    if (!lib) throw new Error('lib.js を読み込めませんでした。panel\\install.ps1 を再実行してください / lib.js failed to load. Re-run panel\\install.ps1');
+    return lib;
+  }
+
+  // 入力を検査し、URL を origin（https://host[:port]）にそろえる。保存はしない
+  // Validates the input and normalizes the URL to its origin (https://host[:port]); does not save.
+  function normalizeSettings(settings) {
     const input = settings || {};
     let url;
     try {
@@ -57,7 +66,12 @@ const YTSServer = (function () {
     if (url.protocol !== 'https:') throw new Error('サーバー URL は https:// で始めてください / The server URL must start with https://');
     const token = String(input.token || '').trim();
     if (!token) throw new Error('トークンを入力してください / Enter a token');
-    const saved = { serverUrl: url.origin, token: token };
+    return { serverUrl: url.origin, token: token };
+  }
+
+  // 検査・正規化してから保存する / Validates, normalizes, then saves
+  function saveSettings(settings) {
+    const saved = normalizeSettings(settings);
     storage().setItem(SETTINGS_KEY, JSON.stringify(saved));
     return saved;
   }
@@ -66,15 +80,17 @@ const YTSServer = (function () {
     if (status === 401) return 'トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me';
     if (status === 403) return 'このチャンネルの会員ではありません / Not a member of this channel';
     if (status === 404) return 'サーバーに見つかりません (404) / Not found on the server (404)';
-    if (lib.isRetryableUpload(status)) return 'サーバーが一時的に応答しません (' + status + ') / Server temporarily unavailable (' + status + ')';
+    if (requireLib().isRetryableUpload(status)) return 'サーバーが一時的に応答しません (' + status + ') / Server temporarily unavailable (' + status + ')';
     return 'サーバーがエラーを返しました (' + status + ') / Server returned an error (' + status + ')';
   }
 
   // Bearer トークン付きで JSON をやり取りする。非 2xx は {status, error, detail, message} の Error を throw
   // Exchanges JSON with the Bearer token; non-2xx throws an Error with {status, error, detail, message}.
+  // opts.settings があれば保存済みの設定の代わりに使う（接続の確認用）
+  // opts.settings, when given, replaces the saved settings (used to check before saving).
   async function api(path, options) {
     const opts = options || {};
-    const settings = loadSettings();
+    const settings = opts.settings || loadSettings();
     if (!settings.serverUrl || !settings.token) {
       throw apiError(0, 'not_configured', '', 'サーバー URL とトークンを設定してください / Set the server URL and token');
     }
@@ -104,8 +120,10 @@ const YTSServer = (function () {
     return data;
   }
 
-  function me() {
-    return api('/api/me');
+  // candidate（normalizeSettings の結果）を渡すと、保存せずにその設定で確かめる
+  // With candidate (a normalizeSettings result), checks those settings without saving them.
+  function me(candidate) {
+    return api('/api/me', candidate ? { settings: candidate } : undefined);
   }
 
   async function listStreams(channel) {
@@ -127,7 +145,7 @@ const YTSServer = (function () {
   // with the results so far in partial (retryable for network failure / 408 / 429 / 5xx / a malformed 200).
   async function pushStamps(records) {
     const list = records || [];
-    const batches = lib.planUpload(list, list.map(function (record) { return record.id; }), MAX_PER_REQUEST);
+    const batches = requireLib().planUpload(list, list.map(function (record) { return record.id; }), MAX_PER_REQUEST);
     const total = { accepted: [], rejected: [] };
     for (let i = 0; i < batches.length; i += 1) {
       let response;
@@ -138,7 +156,7 @@ const YTSServer = (function () {
         }
       } catch (error) {
         // 未設定は status 0 でも再送で直らない / Missing settings are not fixed by a retry despite status 0
-        error.retryable = error.error === 'http_200' || (error.error !== 'not_configured' && lib.isRetryableUpload(error.status));
+        error.retryable = error.error === 'http_200' || (error.error !== 'not_configured' && requireLib().isRetryableUpload(error.status));
         error.partial = total;
         throw error;
       }
@@ -151,6 +169,7 @@ const YTSServer = (function () {
   return {
     configure: configure,
     loadSettings: loadSettings,
+    normalizeSettings: normalizeSettings,
     saveSettings: saveSettings,
     api: api,
     me: me,

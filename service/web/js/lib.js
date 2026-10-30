@@ -536,6 +536,8 @@ const TSLib = (function () {
   function serverMirrorPath(baseDir, serverUrl, streamId) {
     const base = String(baseDir || '').replace(/[\\/]+$/, '');
     const host = new URL(serverUrl).host.replace(/[^A-Za-z0-9_.-]/g, '_');
+    // . や .. のフォルダ名はフォルダ移動になる / Folder names like . or .. would move between folders
+    if (/^\.+$/.test(host)) throw new Error('サーバー URL のホスト名が不正です / invalid server host');
     const safeId = String(streamId || '').replace(/[^A-Za-z0-9_.-]/g, '_');
     return base + '/server/' + host + '/' + safeId + '_sync.csv';
   }

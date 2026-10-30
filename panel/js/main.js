@@ -94,7 +94,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let thumbDiskCacheDir = '';
   const sourceMtimeCache = new Map();
   // 同期元「サーバー」の状態 / State of the "server" sync source
-  const serverReady = typeof YTSServer !== 'undefined';
+  // window のプロパティとして読む（server.js が失敗しても TDZ の ReferenceError にならない）
+  // Read as a window property (no TDZ ReferenceError even if server.js failed).
+  const serverReady = !!window.YTSServer;
   let serverBusy = false;
   let serverLogin = '';
   let serverStreams = [];
@@ -2107,15 +2109,16 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
-  // 設定を保存して /api/me で確かめ、会員のチャンネルを並べる / Saves the settings, checks them with /api/me, and lists member channels
+  // 入力を /api/me で確かめ、通ったときだけ保存して会員のチャンネルを並べる（失敗しても前の設定と入力欄は残す）
+  // Checks the input with /api/me, saves it only on success, and lists member channels (a failure keeps the old settings and the inputs).
   async function connectServer() {
+    let candidate;
     try {
-      YTSServer.saveSettings({ serverUrl: elements.serverUrl.value, token: elements.serverToken.value });
+      candidate = YTSServer.normalizeSettings({ serverUrl: elements.serverUrl.value, token: elements.serverToken.value });
     } catch (error) {
       setStatus(messageOf(error), 'error');
       return;
     }
-    elements.serverUrl.value = YTSServer.loadSettings().serverUrl;
     elements.serverPicker.hidden = true;
     serverStreams = [];
     clearChildren(elements.serverChannel);
@@ -2123,13 +2126,15 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     setServerBusy(true);
     let me;
     try {
-      me = await YTSServer.me();
+      me = await YTSServer.me(candidate);
+      YTSServer.saveSettings(candidate);
     } catch (error) {
       setStatus(messageOf(error), 'error');
       return;
     } finally {
       setServerBusy(false);
     }
+    elements.serverUrl.value = candidate.serverUrl;
     serverLogin = String((me && me.login) || '');
     const channels = me && Array.isArray(me.channels) ? me.channels : [];
     channels.forEach(function (channel) {

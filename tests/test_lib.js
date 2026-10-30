@@ -1017,6 +1017,10 @@ assert.strictEqual(TSLib.frameFileName(5, 30, 'x'.repeat(80)), '00-00-05-00_' + 
   assert.strictEqual(TSLib.serverMirrorPath('/d', 'https://h', 'x/../y'), '/d/server/h/x_.._y_sync.csv');
   // 末尾の区切りは 1 つにまとめ、host:port の : は _ に / A trailing separator is dropped; the : of host:port becomes _
   assert.strictEqual(TSLib.serverMirrorPath('/d/', 'https://h:8443/x', 'a b'), '/d/server/h_8443/a_b_sync.csv');
+  // ドットだけの host はフォルダ移動になるので拒否 / A dots-only host would climb folders, so it is rejected
+  ['https://.', 'https://..', 'https://...'].forEach((url) => {
+    assert.throws(() => TSLib.serverMirrorPath('/d', url, 's'), /ホスト名が不正です \/ invalid server host/);
+  });
   const p = TSLib.recordsToPush([{ id: 'a', updated_at: '2026-01-02T00:00:00.000Z', offset_sec: 1, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }, { id: 'b', updated_at: '2026-01-01T00:00:00.000Z', offset_sec: 2, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }], '2026-01-01T12:00:00.000Z');
   assert.deepStrictEqual(p.map(r => r.id), ['a']); assert.strictEqual(p[0].timecode, '00:00:01');
   assert.strictEqual(TSLib.recordsToPush([{ id: 'c', created_at: '2026-01-01T00:00:00.000Z', offset_sec: 0, by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }], '').length, 1);

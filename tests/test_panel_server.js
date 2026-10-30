@@ -4,6 +4,9 @@
 // Tests panel/js/server.js (the panel's "server" sync source) with a fake fetch and a fake localStorage.
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 const YTSServer = require('../panel/js/server.js');
 
 // localStorage と同じ getItem / setItem / removeItem を持つ偽物 / Fake with localStorage's getItem / setItem / removeItem
@@ -178,6 +181,35 @@ const tokenSettings = JSON.stringify({ serverUrl: 'https://h.example', token: 'y
     // 設定が無いのは再送で直らない / Missing settings are not retryable
     YTSServer.configure({ storage: createFakeStorage() });
     await assert.rejects(YTSServer.pushStamps(makeRecords(1)), (error) => { assert.strictEqual(error.retryable, false); assert.strictEqual(error.error, 'not_configured'); return true; });
+  }
+
+  // me(候補) は候補の URL / トークンで送り、保存はしない（接続の確認後にだけ保存するため）
+  // me(candidate) sends with the candidate URL / token without saving (settings are saved only after the check passes).
+  {
+    const storage = createFakeStorage({ 'yts.server': tokenSettings });
+    const fetch = createFakeFetch(() => ({ status: 401, body: { error: 'unauthorized' } }));
+    YTSServer.configure({ fetch: fetch, storage: storage });
+    const candidate = YTSServer.normalizeSettings({ serverUrl: ' https://New.example/x ', token: ' ytt_new ' });
+    assert.deepStrictEqual(candidate, { serverUrl: 'https://new.example', token: 'ytt_new' });
+    assert.throws(() => YTSServer.normalizeSettings({ serverUrl: 'http://x', token: 't' }), /https/);
+    await assert.rejects(YTSServer.me(candidate), (error) => { assert.strictEqual(error.status, 401); return true; });
+    assert.strictEqual(fetch.calls[0].url, 'https://new.example/api/me');
+    assert.strictEqual(fetch.calls[0].headers.Authorization, 'Bearer ytt_new');
+    // 失敗しても保存済みの設定は変わらない / The saved settings stay unchanged after the failure
+    assert.strictEqual(storage.items['yts.server'], tokenSettings);
+  }
+
+  // CEP で lib.js が読めず require も無いときも、server.js の読み込み自体は失敗しない（main.js の案内を出せるように）
+  // In CEP with lib.js missing and no require, loading server.js itself must not throw (so main.js can show its notice).
+  {
+    const source = fs.readFileSync(path.resolve(__dirname, '../panel/js/server.js'), 'utf8');
+    const context = vm.createContext({ window: {} });
+    assert.doesNotThrow(() => vm.runInContext(source, context));
+    assert.strictEqual(vm.runInContext('typeof YTSServer', context), 'object');
+    assert.ok(context.window.YTSServer, 'window.YTSServer must be set');
+    // lib が要る関数は呼んだときに日英の Error / Functions needing lib throw a bilingual Error when called
+    context.window.YTSServer.configure({ storage: createFakeStorage({ 'yts.server': tokenSettings }), fetch: createFakeFetch(() => ({ status: 200, body: {} })) });
+    await assert.rejects(context.window.YTSServer.pushStamps(makeRecords(1)), /lib\.js を読み込めませんでした.* \/ lib\.js/);
   }
 
   console.log('all tests passed');
