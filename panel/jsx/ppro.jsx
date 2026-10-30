@@ -724,14 +724,49 @@ function ytsApply(ops) {
     }
 }
 
+// parent 直下の名前が一致する bin（無ければ null）/ The child bin of parent with this name (null when missing)
+function ytsFindBin(parent, name) {
+    var i;
+    var child;
+    if (!parent || !parent.children) return null;
+    for (i = 0; i < parent.children.numItems; i += 1) {
+        child = parent.children[i];
+        if (child && child.type === ProjectItemType.BIN && child.name === name) return child;
+    }
+    return null;
+}
+
+// parent 直下の bin を探し、無ければ作る / Finds the child bin of parent, creating it when missing
+function ytsFindOrCreateBin(parent, name) {
+    var bin = ytsFindBin(parent, name);
+    var made;
+    if (bin) return bin;
+    made = parent.createBin(name);
+    // createBin は失敗時 0 を返す。成功時も取り直して実体を返す / createBin returns 0 on failure; re-read to return the live item
+    return ytsFindBin(parent, name) || (made && typeof made === "object" ? made : null);
+}
+
+// root から names の順に bin をたどる。create なら足りない bin を作る（作れなければ null）
+// Walks bins from root along names; with create, missing bins are created (null when one cannot be found or made).
+function ytsFindBinPath(root, names, create) {
+    var bin = root;
+    var i;
+    for (i = 0; i < names.length && bin; i += 1) bin = create ? ytsFindOrCreateBin(bin, names[i]) : ytsFindBin(bin, names[i]);
+    return bin || null;
+}
+
 // フル尺 Sequence のマーカー 1 つごとに Short 用 Sequence を作る。クリップは動かさず、元の In/Out は最後に戻す
 // Creates one Short sequence per marker of the active full-length sequence. Clips are never moved; the original In/Out is restored at the end.
-// p = { preSec, postSec, includeHuman, binName, prefix }
+// p = { preSec, postSec, includeHuman, binName, prefix, onlyIds }
+// onlyIds（スタンプ id の配列）を渡すと、その id のマーカーだけを対象にし includeHuman は見ない
+// With onlyIds (array of stamp ids), only markers with those ids are targeted and includeHuman is ignored.
 function ytsCreateShorts(p) {
     var TICKS_PER_SEC = 254016000000;
     var seq = app.project ? app.project.activeSequence : null;
-    var created = 0;
+    var created = [];
     var names = [];
+    var sequenceNames = [];
+    var onlySet = null;
     var skipped = 0;
     var usedNames = {};
     var targets = [];
@@ -755,8 +790,6 @@ function ytsCreateShorts(p) {
     var sub;
     var subMarkers;
     var bin = null;
-    var root;
-    var child;
     var dateTag;
     var namePrefix;
     var parentBinName;
@@ -764,6 +797,7 @@ function ytsCreateShorts(p) {
     var binPath;
     var origId;
     var existing;
+    var id;
     // Premiere 26 で確実に効くのは ticks で作った Time / A Time built from ticks is the form known to work in Premiere 26.
     var toTime = function (sec) {
         var t = new Time();
@@ -787,6 +821,10 @@ function ytsCreateShorts(p) {
     binName = dateTag ? "_" + dateTag : String(p.binName || "Peakaboo_Shorts");
     parentBinName = dateTag ? String(p.parentBin || "Sequence") : "";
     binPath = (parentBinName ? parentBinName + "/" : "") + binName;
+    if (p.onlyIds instanceof Array) {
+        onlySet = {};
+        for (i = 0; i < p.onlyIds.length; i += 1) onlySet["i_" + String(p.onlyIds[i])] = true;
+    }
     try {
         origId = String(seq.sequenceID);
         origIn = parseFloat(seq.getInPoint());
@@ -796,33 +834,29 @@ function ytsCreateShorts(p) {
 
         list = ytsMarkerArray(seq.markers);
         for (i = 0; i < list.length; i += 1) {
-            if (!ytsMarkerId(list[i])) continue;
-            if (!p.includeHuman && !ytsIsCandidate(list[i].name)) continue;
-            targets.push({ t: Number(list[i].start.seconds), name: String(list[i].name || "") });
+            id = ytsMarkerId(list[i]);
+            if (!id) continue;
+            if (onlySet) {
+                if (!onlySet["i_" + id]) continue;
+            } else if (!p.includeHuman && !ytsIsCandidate(list[i].name)) continue;
+            targets.push({ t: Number(list[i].start.seconds), name: String(list[i].name || ""), id: id });
         }
         targets.sort(function (a, b) { return a.t - b.t; });
 
         allSequences = app.project.sequences;
-        for (i = 0; i < allSequences.numSequences; i += 1) usedNames["n_" + allSequences[i].name] = true;
+        for (i = 0; i < allSequences.numSequences; i += 1) {
+            usedNames["n_" + allSequences[i].name] = true;
+            sequenceNames.push(String(allSequences[i].name));
+        }
 
         // 既にその日の bin に Short があれば番号はその続きから。p.dryRun なら件数だけ返す（二重作成の確認用）
         // Numbering continues after Shorts already in the day's bin. p.dryRun only reports the count (used to confirm before duplicating).
         existing = 0;
-        root = app.project.rootItem;
-        parentBin = null;
-        if (parentBinName) {
-            for (j = 0; j < root.children.numItems; j += 1) {
-                child = root.children[j];
-                if (child && child.type === ProjectItemType.BIN && child.name === parentBinName) { parentBin = child; break; }
-            }
-        }
-        if (!parentBin) { parentBin = root; binPath = binName; }
-        for (j = 0; j < parentBin.children.numItems; j += 1) {
-            child = parentBin.children[j];
-            if (child && child.type === ProjectItemType.BIN && child.name === binName) { bin = child; break; }
-        }
+        parentBin = parentBinName ? ytsFindBin(app.project.rootItem, parentBinName) : null;
+        if (!parentBin) { parentBin = app.project.rootItem; binPath = binName; }
+        bin = ytsFindBin(parentBin, binName);
         if (bin) existing = bin.children.numItems;
-        if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length });
+        if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length, sequenceNames: sequenceNames });
 
         for (i = 0; i < targets.length; i += 1) {
             inSec = Math.max(0, targets[i].t - preSec);
@@ -831,7 +865,7 @@ function ytsCreateShorts(p) {
                 skipped += 1;
                 continue;
             }
-            n = existing + created + 1;
+            n = existing + created.length + 1;
             name = namePrefix + ytsShortName(targets[i].name, n);
             while (usedNames["n_" + name]) {
                 n += 1;
@@ -852,7 +886,8 @@ function ytsCreateShorts(p) {
             sub.name = name;
             usedNames["n_" + name] = true;
             names.push(name);
-            created += 1;
+            // sequenceId は Task 9 が ytsPlaceChat / ytsPlaceCaption に渡すため / sequenceId lets the caller pass it to ytsPlaceChat / ytsPlaceCaption
+            created.push({ id: targets[i].id, name: name, sequenceId: String(sub.sequenceID) });
 
             // [yts:<id>] が残ると同期で元のスタンプを動かすので、作った Sequence のマーカーは全部消す
             // Delete every marker in the new sequence; a surviving [yts:<id>] tag would make sync move the original stamp.
@@ -865,12 +900,12 @@ function ytsCreateShorts(p) {
             } catch (markerError) {}
 
             // 日付 bin は親 bin（既定 Sequence）の下、親が無ければルート。無ければここで作る / The day bin sits under the parent (default Sequence), else at the root; created here when missing
-            if (!bin) bin = parentBin.createBin(binName) || null;
+            if (!bin) bin = ytsFindOrCreateBin(parentBin, binName);
             if (bin && sub.projectItem) sub.projectItem.moveBin(bin);
         }
         result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped, bin: binPath });
     } catch (e) {
-        result = "ERR|" + created + " 件作成後に失敗: " + e.toString();
+        result = "ERR|" + created.length + " 件作成後に失敗: " + e.toString();
     } finally {
         // In/Out を一度でも動かしたときだけ元へ戻す。未設定は -400000 と読めるので、数値の -400000 を置き直すと未設定に戻る
         // （PPro 26.5 実機で確認、2026-10-30）。out → in → out の順は、途中で In と Out の前後が入れ替わって弾かれるのを避けるため
@@ -889,7 +924,177 @@ function ytsCreateShorts(p) {
         try { if (app.project.activeSequence && String(app.project.activeSequence.sequenceID) !== origId) app.project.activeSequence = seq; } catch (activateError2) {}
     }
     if (restoreError) {
-        return "ERR|" + created + " 件作成しましたが In/Out を戻せませんでした: " + restoreError.toString();
+        return "ERR|" + created.length + " 件作成しましたが In/Out を戻せませんでした: " + restoreError.toString();
     }
     return result;
+}
+
+// Sequence を sequenceID（優先）か名前で探す / Finds a sequence by sequenceID (preferred) or by name
+function ytsFindSequence(sequenceId, name) {
+    var list = app.project.sequences;
+    var i;
+    var s;
+    for (i = 0; i < Number(list.numSequences); i += 1) {
+        s = list[i];
+        if (sequenceId ? String(s.sequenceID) === String(sequenceId) : String(s.name) === String(name)) return s;
+    }
+    return null;
+}
+
+// 素材パスが同じ既存の項目（無ければ null）。Windows のパスは大文字小文字を区別しない
+// An existing project item with the same media path (null when none). Windows paths compare case-insensitively.
+function ytsFindItemByMediaPath(path) {
+    var native = new File(path).fsName;
+    var want = native.toLowerCase();
+    var items = app.project.rootItem.findItemsMatchingMediaPath(native, 1);
+    var count;
+    var i;
+    if (!items) return null;
+    count = Number(items.length || items.numItems || 0);
+    for (i = 0; i < count; i += 1) {
+        try {
+            if (new File(String(items[i].getMediaPath())).fsName.toLowerCase() === want) return items[i];
+        } catch (pathError) {}
+    }
+    return null;
+}
+
+// 同じ素材が既にあれば再利用し、無ければ bin へ読み込む（二重に読み込まない）
+// Reuses an item with the same media, else imports it into bin (never imports twice).
+function ytsImportOnce(path, bin) {
+    var item = ytsFindItemByMediaPath(path);
+    if (item) return item;
+    if (!bin) throw new Error("読み込み先の bin を作れませんでした");
+    // importFiles(パス配列, 警告を出さない, 読み込み先 bin, 連番静止画として読まない) / (paths, suppressUI, targetBin, importAsNumberedStills)
+    app.project.importFiles([new File(path).fsName], true, bin, false);
+    item = ytsFindItemByMediaPath(path);
+    if (!item) throw new Error("読み込めませんでした: " + path);
+    return item;
+}
+
+// 配信の素材を Footage/_<dateTag> に読み込み、フル尺 Sequence を Sequence/_<dateTag> に作って開く。同名の Sequence があれば作らずそれを開く
+// Imports the stream footage into Footage/_<dateTag>, creates the full-length sequence in Sequence/_<dateTag> and opens it; an existing same-named sequence is reused and opened instead.
+// createNewSequenceFromClips(名前, [項目], 入れ先 bin) は Sequence を返し、失敗時は 0 / returns the Sequence, 0 on failure
+// p = { footage, dateTag, sequenceName }
+function ytsImportStream(p) {
+    var footage;
+    var dateTag;
+    var sequenceName;
+    var item;
+    var seq;
+    var existing;
+    try {
+        p = p || {};
+        footage = String(p.footage || "");
+        dateTag = String(p.dateTag || "");
+        sequenceName = String(p.sequenceName || "");
+        if (!/^[0-9]{6}$/.test(dateTag)) return "ERR|日付（YYMMDD）が不正です";
+        if (!sequenceName) return "ERR|Sequence 名がありません";
+        if (!footage || !new File(footage).exists) return "ERR|素材が見つかりません: " + footage;
+        item = ytsImportOnce(footage, ytsFindBinPath(app.project.rootItem, ["Footage", "_" + dateTag], true));
+        seq = ytsFindSequence("", sequenceName);
+        existing = !!seq;
+        if (!seq) {
+            seq = app.project.createNewSequenceFromClips(sequenceName, [item],
+                ytsFindBinPath(app.project.rootItem, ["Sequence", "_" + dateTag], true));
+            if (!seq || typeof seq !== "object") return "ERR|Sequence を作れませんでした";
+        }
+        // 続くマーカー同期と Short 作成はアクティブな Sequence に対して動くので、既存でも開く
+        // Marker sync and Short creation that follow work on the active sequence, so the existing one is opened too.
+        app.project.openSequence(String(seq.sequenceID));
+        return "OK|" + ytsJson({ sequenceId: String(seq.sequenceID), existing: existing, projectItem: String(item.nodeId) });
+    } catch (e) {
+        return "ERR|配信を取り込めませんでした: " + e.toString();
+    }
+}
+
+// チャット動画（.mov）を Footage/_<dateTag>/chat に読み込み、Short の V2 の 0 秒に置く。終わったら元のアクティブ Sequence に戻す
+// Imports the chat video (.mov) into Footage/_<dateTag>/chat and puts it at 0 s on the Short's V2; the previously active sequence is reopened afterwards.
+// p = { sequenceId, movPath, dateTag }
+function ytsPlaceChat(p) {
+    var origId = "";
+    var result = "";
+    var seq;
+    var item;
+    var movPath;
+    var dateTag;
+    var qeSeq;
+    var track;
+    var fps;
+    var tolerance;
+    var i;
+    try {
+        p = p || {};
+        movPath = String(p.movPath || "");
+        dateTag = String(p.dateTag || "");
+        if (!/^[0-9]{6}$/.test(dateTag)) return "ERR|日付（YYMMDD）が不正です";
+        if (!movPath || !new File(movPath).exists) return "ERR|チャット動画が見つかりません: " + movPath;
+        seq = ytsFindSequence(p.sequenceId, "");
+        if (!seq) return "ERR|Short が見つかりません";
+        item = ytsImportOnce(movPath, ytsFindBinPath(app.project.rootItem, ["Footage", "_" + dateTag, "chat"], true));
+        origId = app.project.activeSequence ? String(app.project.activeSequence.sequenceID) : "";
+        // QE はアクティブな Sequence にしか効かないので開く / QE only acts on the active sequence, so open it
+        app.project.openSequence(String(seq.sequenceID));
+        if (Number(seq.videoTracks.numTracks) < 2) {
+            app.enableQE();
+            qeSeq = qe.project.getActiveSequence();
+            // 名前を確かめてから足す（別の Sequence に足さないため）。addTracks(映像の本数, 足す位置, 音声の本数)
+            // Check the name first so the track never lands in another sequence. addTracks(video count, insert index, audio count)
+            if (qeSeq && String(qeSeq.name) === String(seq.name)) qeSeq.addTracks(1, 1, 0);
+            seq = ytsFindSequence(p.sequenceId, "");
+        }
+        if (!seq || Number(seq.videoTracks.numTracks) < 2) {
+            result = "ERR|V2 がありません。Short に V2 を足してから再実行してください";
+        } else {
+            track = seq.videoTracks[1];
+            fps = 254016000000 / parseFloat(seq.timebase);
+            tolerance = isFinite(fps) && fps > 0 ? 0.5 / fps : 0;
+            for (i = 0; i < Number(track.clips.numItems); i += 1) {
+                if (Math.abs(Number(track.clips[i].start.seconds)) <= tolerance) {
+                    result = "OK|" + ytsJson({ placed: false, skipped: "already" });
+                    break;
+                }
+            }
+            if (!result) {
+                // Track.insertClip(項目, ticks の文字列)。チャット動画は映像だけなので音声トラックは触らない
+                // Track.insertClip(item, time in ticks as a string). The chat video has no audio, so no audio track is touched.
+                track.insertClip(item, "0");
+                result = "OK|" + ytsJson({ placed: true });
+            }
+        }
+    } catch (e) {
+        result = "ERR|チャット動画を置けませんでした: " + e.toString();
+    } finally {
+        try { if (origId && app.project.activeSequence && String(app.project.activeSequence.sequenceID) !== origId) app.project.openSequence(origId); } catch (activateError) {}
+    }
+    return result;
+}
+
+// 字幕（.srt）を Sequence/_<dateTag>/captions に読み込み、Short のキャプショントラックに置く
+// Imports the captions (.srt) into Sequence/_<dateTag>/captions and puts them on the Short's caption track.
+// 調べた API（PPro 26.5）: Sequence.createCaptionTrack(項目, 開始秒, 形式) / API checked: Sequence.createCaptionTrack(item, startSeconds, format)
+// p = { sequenceId, srtPath, dateTag }
+function ytsPlaceCaption(p) {
+    var seq;
+    var item;
+    var srtPath;
+    var dateTag;
+    var placed = false;
+    try {
+        p = p || {};
+        srtPath = String(p.srtPath || "");
+        dateTag = String(p.dateTag || "");
+        if (!/^[0-9]{6}$/.test(dateTag)) return "ERR|日付（YYMMDD）が不正です";
+        if (!srtPath || !new File(srtPath).exists) return "ERR|字幕ファイルが見つかりません: " + srtPath;
+        seq = ytsFindSequence(p.sequenceId, "");
+        if (!seq) return "ERR|Short が見つかりません";
+        item = ytsImportOnce(srtPath, ytsFindBinPath(app.project.rootItem, ["Sequence", "_" + dateTag, "captions"], true));
+        if (typeof seq.createCaptionTrack === "function") {
+            try { placed = seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE) === true; } catch (captionError) { placed = false; }
+        }
+        if (placed) return "OK|" + ytsJson({ placed: true });
+        return "OK|" + ytsJson({ placed: false, imported: true, note: "字幕は bin から各 Short へドラッグ" });
+    } catch (e) {
+        return "ERR|字幕を読み込めませんでした: " + e.toString();
+    }
 }

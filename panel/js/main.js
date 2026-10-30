@@ -263,10 +263,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       }
       const out = await callHost('ytsCreateShorts(' + hostLiteral(params) + ')', true);
       // skipped = 範囲が取れない、または Sequence を作れなかったマーカー / skipped = markers with no usable range or whose sequence could not be created
-      if (!out.created) {
+      if (!out.created.length) {
         setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : ''), '');
       } else {
-        setStatus(out.created + ' 件の Sequence を作成しました（' + (out.bin || 'Peakaboo_Shorts') + '）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : ''), 'ok');
+        setStatus(out.created.length + ' 件の Sequence を作成しました（' + (out.bin || 'Peakaboo_Shorts') + '）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : ''), 'ok');
       }
       closeShortsPopover();
     } catch (error) { setStatus(messageOf(error), 'error'); } finally { setBusy(false); }
