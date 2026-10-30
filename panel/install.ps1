@@ -1,4 +1,4 @@
-# Yato Twitch Timestamp - Premiere Pro / After Effects dev install
+# Peakaboo (yato-twitch-timestamp) - Premiere Pro / After Effects dev install
 # Links this dev folder into %APPDATA%\Adobe\CEP\extensions via a Directory Junction
 # and enables PlayerDebugMode so the unsigned CEP extension loads.
 # No admin rights required (HKCU / user area only).
@@ -32,4 +32,4 @@ foreach ($v in 10, 11, 12) {
     Set-ItemProperty -Path $key -Name "PlayerDebugMode" -Value "1" -Type String
     Write-Host "PlayerDebugMode=1 set on CSXS.$v" -ForegroundColor Green
 }
-Write-Host "Done. Restart Premiere Pro / After Effects, then open Window > Extensions > Yato Twitch Timestamp." -ForegroundColor Cyan
+Write-Host "Done. Restart Premiere Pro / After Effects, then open Window > Extensions > Peakaboo." -ForegroundColor Cyan

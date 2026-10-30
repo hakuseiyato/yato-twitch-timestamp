@@ -177,7 +177,7 @@ const YTSApi = (function () {
       return el('a', { href: href, text: text, 'aria-current': current === href ? 'page' : null });
     };
     header.replaceChildren(
-      el('a', { class: 'brand', href: '/', text: 'Yato Twitch Timestamp' }),
+      el('a', { class: 'brand', href: '/', text: 'Peakaboo' }),
       el('nav', { class: 'site-nav', 'aria-label': 'メニュー / Menu' }, [
         link('/', '配信一覧 / Streams'),
         link('/me', 'マイページ / My page'),

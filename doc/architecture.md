@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Yato Twitch Timestamp is a Manifest V3 Chrome extension for recording useful moments during Twitch live streams. Broadcasters and editors can create native Twitch markers, while moderators without permission fall back to local records through the same action. Every record is stored locally and can be exported as a CSV sync file shared with one CEP panel that supports both Premiere Pro and After Effects.
+Peakaboo (repository `yato-twitch-timestamp`) is a Manifest V3 Chrome extension for recording useful moments during Twitch live streams. Broadcasters and editors can create native Twitch markers, while moderators without permission fall back to local records through the same action. Every record is stored locally and can be exported as a CSV sync file shared with one CEP panel that supports both Premiere Pro and After Effects.
 
 `service/` adds a cloud side: one Cloudflare Worker that stores streams, stamps, and members in D1, stores each VOD's chat replay in R2, and serves web pages with a comment-density graph per stream. The extension sends its stamps to the Worker when a server URL is set; the panel can use a Worker stream as its sync source through a mirror CSV.
 
@@ -187,7 +187,7 @@ The browser signs in through the Twitch implicit grant, returns to `/auth/callba
 2. Register `https://nkebinaanllmgbkpehnlcaomjcofdnng.chromiumapp.org/` as the redirect URL in Twitch Developer Console.
 3. Load `extension/` as an unpacked extension from `chrome://extensions`.
 4. Log in from the popup (the Client ID is prefilled). To send stamps to the service, also save the server URL and grant the host permission.
-5. Install the Adobe panel with `powershell -ExecutionPolicy Bypass -File panel\install.ps1`, restart the target app, and open **Window > Extensions > Yato Twitch Timestamp**.
+5. Install the Adobe panel with `powershell -ExecutionPolicy Bypass -File panel\install.ps1`, restart the target app, and open **Window > Extensions > Peakaboo**.
 
 The installer copies `extension/lib.js` to `panel/js/lib.js` on every run (the panel loads the copy); the test suite checks that the copy is current.
 

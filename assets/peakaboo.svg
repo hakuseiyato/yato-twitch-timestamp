@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Peakaboo: チャット密度の山。高い棒ほど明るい / Peakaboo: the chat-density peak; taller bars are brighter -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2033"/><stop offset="1" stop-color="#15182a"/></linearGradient>
+    <linearGradient id="peak" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fd0ff"/><stop offset="1" stop-color="#2d8ceb"/></linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect x="9"  y="42" width="8"  height="14" rx="2.5" fill="#34477a"/>
+  <rect x="19" y="34" width="8"  height="22" rx="2.5" fill="#4a69b0"/>
+  <rect x="29" y="14" width="10" height="42" rx="3"   fill="url(#peak)"/>
+  <rect x="41" y="36" width="8"  height="20" rx="2.5" fill="#4262a6"/>
+  <rect x="51" y="46" width="6"  height="10" rx="2.5" fill="#2f416f"/>
+</svg>

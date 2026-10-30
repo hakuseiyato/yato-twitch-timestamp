@@ -1,28 +1,47 @@
 {
   "manifest_version": 3,
-  "name": "Yato Twitch Timestamp",
-  "version": "0.4.0",
+  "name": "Peakaboo",
+  "version": "0.5.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1uw4jQxPAi9ftpwH/uEcLyfG+xIdG7AqnkUAoEF6zW6+jyGFD6nSBfcTn9U9x/0qjqXlK8zBwdqTeEVvo82gc75YZXcysEB4BB+aMZMyPSBxSKdLviDA6y+tq2oqwKpY4FGvgKg70uTcQyUEUtxW6ilSoZmx+I/YLMWMa5rl8GaoGfkod8kG7OqplrjUk5VVtLgb/iD1n7G1WE0lFzD73P30rvSUldaS1dIWeHdngpVDgIqgdIgmJqNzt4Y6lDgY7egaKYGjdN2asWjMGtcDPAFsWwJo9iGL6sPQIYqr+A/wUU+FGrB5bslt9pEjvegxsHweAR4bcdzgtIF5rP0wSwIDAQAB",
-  "permissions": ["identity", "storage", "alarms"],
+  "permissions": [
+    "identity",
+    "storage",
+    "alarms"
+  ],
   "host_permissions": [
     "https://api.twitch.tv/*",
     "https://id.twitch.tv/*",
     "https://www.twitch.tv/*"
   ],
-  "optional_host_permissions": ["https://*/*"],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.twitch.tv/*"],
-      "js": ["lib.js", "content.js"],
-      "css": ["content.css"],
+      "matches": [
+        "https://www.twitch.tv/*"
+      ],
+      "js": [
+        "lib.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/peakaboo-16.png",
+      "32": "icons/peakaboo-32.png",
+      "48": "icons/peakaboo-48.png",
+      "128": "icons/peakaboo-128.png"
+    }
   },
   "commands": {
     "stamp": {
@@ -31,5 +50,12 @@
       },
       "description": "タイムスタンプを押す"
     }
+  },
+  "description": "Twitch 配信のタイムスタンプを押し、切り抜きの当たりをチームで共有する / Stamp Twitch streams and share clip candidates with your team",
+  "icons": {
+    "16": "icons/peakaboo-16.png",
+    "32": "icons/peakaboo-32.png",
+    "48": "icons/peakaboo-48.png",
+    "128": "icons/peakaboo-128.png"
   }
 }

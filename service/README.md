@@ -1,4 +1,4 @@
-# service — Yato Twitch Timestamp のクラウド側
+# service — Peakaboo のクラウド側
 
 Cloudflare Worker 1 本で、JSON API（`/api/`・`/auth/`）と `web/` の静的ページ（Workers Static Assets）を出す。
 D1 に配信・スタンプ・会員などを置き、R2 に VOD ごとのチャット JSON を置く。Cloudflare Workers の Free プランで動かす前提。

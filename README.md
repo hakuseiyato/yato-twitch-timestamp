@@ -1,6 +1,8 @@
-# Yato Twitch Timestamp
+# Peakaboo
 
-Yato Twitch Timestamp is a dependency-free Chrome extension for recording useful moments during a Twitch live stream. Broadcasters and editors can create native Twitch stream markers. Moderators without editor permission automatically fall back to local records. Every timestamp is stored locally regardless of whether the native marker succeeds.
+> リポジトリ名は `yato-twitch-timestamp` のまま。製品名は **Peakaboo**（peak + peekaboo: チャットの山が顔を出す）/ The repository keeps its name; the product is **Peakaboo**.
+
+Peakaboo is a dependency-free Chrome extension for recording useful moments during a Twitch live stream. Broadcasters and editors can create native Twitch stream markers. Moderators without editor permission automatically fall back to local records. Every timestamp is stored locally regardless of whether the native marker succeeds.
 
 Records can be exported as a shared CSV sync file for the included Premiere Pro and After Effects panel. Editors can also merge CSV files received from moderators through the extension popup.
 
@@ -102,7 +104,7 @@ The `panel/` CEP extension provides the same sync workflow in Premiere Pro 22+ a
    powershell -ExecutionPolicy Bypass -File panel\install.ps1
    ```
 
-3. Restart Premiere Pro or After Effects, then open **Window > Extensions > Yato Twitch Timestamp**.
+3. Restart Premiere Pro or After Effects, then open **Window > Extensions > Peakaboo**.
 4. Click "選ぶ" for the sync file, choose the stream, and enter the offset in seconds.
 5. Activate the sequence or composition to synchronize, then use "紐付け" in the action row: "紐付け", "＋追加", "同期". The panel links the currently active target in both Premiere Pro and After Effects; it does not create a sequence. If no target is active, it reports "シーケンス（コンポ）を開いてください". For an already linked target, the button reads "再紐付け" and asks "紐付けし直すと同期の履歴が消えます。続けますか？" because re-linking clears its synchronization base.
 6. Once a CSV is loaded and a target is linked, "同期" becomes enabled. Click it to calculate the differences and normally apply them immediately. A confirmation drawer opens only for a calculation error, mass deletion, conflict, first synchronization, tag operation, at least ten additions to the app, or a warning. The drawer provides the difference list, conflict choices, mass-deletion confirmation, "未タグのマーカーも CSV に追加", and "この内容で同期".

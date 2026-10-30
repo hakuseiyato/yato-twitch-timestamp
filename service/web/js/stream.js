@@ -63,7 +63,7 @@
   function renderHead() {
     const title = stream.title || '（タイトルなし） / (untitled)';
     $('stream-title').textContent = title;
-    document.title = title + ' — Yato Twitch Timestamp';
+    document.title = title + ' — Peakaboo';
     const meta = [stream.channel, formatDate(stream.started_at)];
     $('stream-meta').replaceChildren(meta.join(' · '));
     if (stream.vod_id) {

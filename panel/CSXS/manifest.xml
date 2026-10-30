@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="8.0" ExtensionBundleId="com.yato.twitchtimestamp" ExtensionBundleVersion="0.3.0"
-		ExtensionBundleName="Yato Twitch Timestamp" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+		ExtensionBundleName="Peakaboo" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<ExtensionList><Extension Id="com.yato.twitchtimestamp.panel" Version="0.3.0" /></ExtensionList>
 	<ExecutionEnvironment>
 		<HostList><Host Name="PPRO" Version="22.0" /><Host Name="AEFT" Version="22.0" /></HostList>
@@ -12,8 +12,9 @@
 			<DispatchInfo>
 				<Resources><MainPath>./html/index.html</MainPath></Resources>
 				<Lifecycle><AutoVisible>true</AutoVisible></Lifecycle>
-				<UI><Type>Panel</Type><Menu>Yato Twitch Timestamp</Menu>
+				<UI><Type>Panel</Type><Menu>Peakaboo</Menu>
 					<Geometry><Size><Height>560</Height><Width>300</Width></Size><MinSize><Height>420</Height><Width>260</Width></MinSize></Geometry>
+					<Icons><Icon Type="Normal">./icons/peakaboo-23.png</Icon><Icon Type="RollOver">./icons/peakaboo-23.png</Icon><Icon Type="DarkNormal">./icons/peakaboo-23.png</Icon><Icon Type="DarkRollOver">./icons/peakaboo-23.png</Icon></Icons>
 				</UI>
 			</DispatchInfo>
 		</Extension>

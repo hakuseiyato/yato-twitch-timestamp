@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Yato Twitch Timestamp のクラウド側（Cloudflare Worker と Web ページ） / Cloud side of Yato Twitch Timestamp (Cloudflare Worker and web pages)",
+  "description": "Peakaboo のクラウド側（Cloudflare Worker と Web ページ） / Cloud side of Peakaboo (Cloudflare Worker and web pages)",
   "scripts": {
     "dev": "wrangler dev --persist-to .wrangler/state",
     "test": "vitest run",
