@@ -8,6 +8,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import signals  # noqa: E402
 
+W = {'voice': 1.0, 'laugh': 1.0, 'keyword': 0.8, 'chat': 1.0, 'chat_text': 0.5}
 NAMES = {'voice': '声の急変', 'laugh': '笑い', 'keyword': '発言', 'chat': 'チャット急増', 'chat_text': 'チャットの反応'}
 
 
@@ -31,6 +32,8 @@ class SignalsTest(unittest.TestCase):
         out = signals.laughter(db, [], 60)
         self.assertEqual(out[40], 1)
         self.assertEqual(out[10], 0)
+        out = signals.laughter(np.full(60, -40.0), [{'start': -5, 'end': -2, 'text': '笑'}], 60)
+        self.assertEqual(out[0], 0)  # 0 秒より前のセグメントは塗らない / segment before 0 paints nothing
 
     def test_keywords_scoring(self):
         words = ['やばい', '待って']
@@ -66,6 +69,7 @@ class SignalsTest(unittest.TestCase):
         score[0:10] = 3.0
         score[60] = 4.0
         self.assertEqual(len(signals.peaks(score, 2.0)), 2)
+        self.assertEqual(signals.peaks([0.0, 3.0, 1.0], 2.0), [(0.75, 3.0)])  # list も受ける / plain list works
 
     def test_offset_roundtrip(self):
         stamps = [{'id': 'a', 'offset_sec': 600, 'by': 'yato', 'memo': 'ここ', 'deleted': False, 'native': True}]
@@ -103,9 +107,10 @@ class SignalsTest(unittest.TestCase):
         segs = [{'start': 9.0, 'end': 12.0, 'text': 'あ' * 80}, {'start': 30.0, 'end': 31.0, 'text': '遠い'}]
         u = signals.utterance(segs, 10.0)
         self.assertEqual(u, 'あ' * 60)
-        r = signals.reason({'laugh': 2.0, 'chat': 1.5, 'voice': 0.3}, NAMES)
-        self.assertEqual(signals.memo(r, u), '候補: 笑い・チャット急増 | ' + 'あ' * 60)
-        self.assertEqual(signals.reason({'voice': 0.4, 'chat': 0.7}, NAMES), 'チャット急増')
+        r = signals.reason({'laugh': 0.6, 'chat': 1.0, 'voice': 0.3}, NAMES, W)
+        self.assertEqual(signals.memo(r, u), '候補: チャット急増・笑い | ' + 'あ' * 60)
+        self.assertEqual(signals.reason({'voice': 0.4, 'chat': 0.45}, NAMES, W), 'チャット急増')
+        self.assertEqual(signals.reason({'chat_text': 0.3, 'voice': 0.4}, NAMES, W), 'チャットの反応')
 
     def test_pick_default_stream(self):
         streams = [{'stream_id': 'a', 'started_at': '2026-10-29T10:00:00Z', 'vod_id': 'v1'},
@@ -113,6 +118,34 @@ class SignalsTest(unittest.TestCase):
                    {'stream_id': 'c', 'started_at': '2026-10-28T10:00:00Z', 'vod_id': 'v0'}]
         self.assertEqual(signals.pick_default_stream(streams)['stream_id'], 'a')
         self.assertIsNone(signals.pick_default_stream([streams[1]]))
+
+    def test_composite_binary_signal_is_not_zscored(self):
+        laugh = np.zeros(18000)
+        laugh[[100, 101]] = 1.0
+        score, _ = signals.composite({'laugh': laugh}, {'laugh': 1.0})
+        self.assertEqual(score.max(), 1.0)
+
+    def test_composite_chat_z_is_clipped(self):
+        chat = np.zeros(18000)
+        chat[500] = 1000.0
+        _, contrib = signals.composite({'chat': chat}, W)
+        self.assertLessEqual(contrib['chat'].max(), 1.0)
+        self.assertEqual(contrib['chat'].min(), 0.0)
+
+    def test_composite_voice_scaled(self):
+        _, contrib = signals.composite({'voice': np.array([1.5, 4.0])}, {'voice': 1.0})
+        self.assertAlmostEqual(contrib['voice'][0], 0.5)
+        self.assertAlmostEqual(contrib['voice'][1], 1.0)
+
+    def test_threshold_needs_two_signals(self):
+        thr = signals.threshold(2.0, W, set(W))
+        one, zero = np.array([1.0]), np.zeros(1)
+        laugh_only, _ = signals.composite({'laugh': one, 'voice': zero}, W)
+        keyword_only, _ = signals.composite({'keyword': one, 'voice': zero}, W)
+        both, _ = signals.composite({'laugh': one, 'voice': np.array([3.0])}, W)
+        self.assertLess(laugh_only[0], thr)
+        self.assertLess(keyword_only[0], thr)
+        self.assertGreaterEqual(both[0], thr)
 
 
 if __name__ == '__main__':

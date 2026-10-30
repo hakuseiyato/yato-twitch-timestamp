@@ -25,6 +25,12 @@ _RECORD_KEYS = ('id', 'timecode', 'offset_sec', 'by', 'memo', 'native', 'channel
 
 Peak = tuple[float, float]  # (vod_time_sec, score)
 
+# 合成前の正規化表。疎な 0/1 信号を z 化すると 1 区間で z≈95 になりしきい値が効かないため、各信号を [0, 1] に揃える。
+# Normalisation table: z-scoring sparse 0/1 signals gives z≈95 for one segment, so every signal is mapped to [0, 1].
+ZSCORED = ('chat',)  # 密な連続信号: clip(z, 0, 3) / 3 / dense continuous signal
+SCALED = ('voice',)  # voice_spike の diff/min_db: clip(v, 0, 3) / 3 / already diff/min_db
+# 他（laugh / keyword / chat_text）は 0..1 にクリップ / others are clipped to 0..1
+
 
 def rms_db(samples: np.ndarray, sr: int, bin_sec: float = BIN_SEC) -> np.ndarray:
     """各ビンの RMS を dB で返す（端数サンプルは切り捨て）。
@@ -64,6 +70,8 @@ def voice_spike(db: np.ndarray, window_bins: int = 20, min_db: float = 8.0) -> n
 def _segment_bins(seg: dict, n_bins: int) -> slice:
     """セグメント [start, end) が重なるビンの範囲。
     Bin range overlapped by a segment [start, end)."""
+    if seg['end'] <= 0:
+        return slice(0, 0)
     lo = max(0, int(seg['start'] / BIN_SEC))
     hi = max(lo + 1, int(math.ceil(seg['end'] / BIN_SEC)))
     return slice(lo, min(hi, n_bins))
@@ -138,11 +146,21 @@ def chat_text_ratio(comments: list[tuple[float, str]], n_bins: int,
     return _expand(ratio, n_bins)
 
 
+def _normalise(key: str, v: np.ndarray) -> np.ndarray:
+    """信号を正規化表に従って [0, 1] に揃える。
+    Map a signal to [0, 1] following the normalisation table."""
+    if key in ZSCORED:
+        return np.clip(zscore(v), 0.0, 3.0) / 3.0
+    if key in SCALED:
+        return np.clip(np.asarray(v, dtype=np.float64), 0.0, 3.0) / 3.0
+    return np.clip(np.asarray(v, dtype=np.float64), 0.0, 1.0)
+
+
 def composite(signals: dict[str, np.ndarray],
               weights: dict[str, float]) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """合成点と、信号ごとの重み付き z（理由づけ用）。渡された信号だけを足す。
-    Composite score and per-signal weighted z (for reasons); only the given signals are summed."""
-    contrib = {k: weights[k] * zscore(v) for k, v in signals.items()}
+    """合成点と、信号ごとの重み付き正規化値（理由づけ用）。渡された信号だけを足す。
+    Composite score and per-signal weighted normalised values (for reasons); only the given signals are summed."""
+    contrib = {k: weights[k] * _normalise(k, v) for k, v in signals.items()}
     n = len(next(iter(signals.values()))) if signals else 0
     return sum(contrib.values(), np.zeros(n)), contrib
 
@@ -156,7 +174,8 @@ def threshold(base: float, weights: dict[str, float], available: set[str]) -> fl
 def peaks(score: np.ndarray, thr: float, merge_sec: float = 20.0) -> list[Peak]:
     """しきい値以上のビンを merge_sec 以内で統合し、各塊の最大ビンの中央時刻と点を返す。
     Merge above-threshold bins within merge_sec; return the centre time and score of each run's max bin."""
-    idx = np.flatnonzero(np.asarray(score) >= thr)
+    score = np.asarray(score, dtype=np.float64)
+    idx = np.flatnonzero(score >= thr)
     if len(idx) == 0:
         return []
     gap = int(merge_sec / BIN_SEC)
@@ -193,11 +212,11 @@ def stamps_to_blocked(stamps: list[dict], vod_offset_sec: float) -> tuple[list[f
     return blocked, alive
 
 
-def reason(contrib: dict[str, float], names: dict[str, str]) -> str:
-    """重み付き z が 1.0 以上の信号名を高い順に `・` で結ぶ。無ければ最大の 1 つ。
-    Join labels of signals with weighted z >= 1.0, highest first, with `・`; else the single highest."""
+def reason(contrib: dict[str, float], names: dict[str, str], weights: dict[str, float]) -> str:
+    """寄与が自分の重みの半分以上の信号名を高い順に `・` で結ぶ。無ければ最大の 1 つ。
+    Join labels of signals contributing >= 0.5 x their weight, highest first, with `・`; else the single highest."""
     ranked = sorted(contrib.items(), key=lambda kv: kv[1], reverse=True)
-    strong = [k for k, v in ranked if v >= 1.0] or [ranked[0][0]]
+    strong = [k for k, v in ranked if v >= 0.5 * weights[k]] or [ranked[0][0]]
     return '・'.join(names.get(k, k) for k in strong)
 
 
