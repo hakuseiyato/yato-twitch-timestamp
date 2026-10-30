@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>管理 / Admin — Peakaboo</title>
+<title>管理 — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -15,39 +15,32 @@
 <body>
 <header class="site-header" id="site-header" hidden></header>
 
-<main>
-  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+<main class="doc">
+  <p class="status" id="boot-status" role="status">読み込み中…</p>
 
   <!-- 権限なし / Not allowed -->
   <div class="notice" id="forbidden-view" hidden role="alert">
-    <strong>403 権限がありません / 403 Forbidden</strong>
-    このページはサイト管理者とチャンネルの owner だけが使えます / This page is only for the site admin and channel owners.
+    <strong>403 権限がありません</strong>
+    このページはサイト管理者とチャンネルの owner だけが使えます。
   </div>
 
-  <h1 id="admin-heading" hidden>管理 / Admin</h1>
-
-  <!-- チャンネル作成（サイト管理者）/ Create channel (site admin) -->
-  <section class="card" id="create-view" hidden aria-labelledby="create-heading">
-    <h2 id="create-heading">チャンネルを作成 / Create channel</h2>
-    <form id="create-form" novalidate>
-      <div class="form-row">
-        <div class="field">
-          <label for="create-login">Twitch の login / Twitch login</label>
-          <input id="create-login" autocomplete="off" maxlength="25" placeholder="terano_naa" aria-describedby="create-error">
-        </div>
-        <div class="field">
-          <label for="create-display">表示名（任意） / Display name (optional)</label>
-          <input id="create-display" autocomplete="off" maxlength="100">
-        </div>
-        <button type="submit" class="primary" id="create-button">作成 / Create</button>
-      </div>
-      <p class="field-error" id="create-error" role="alert"></p>
-    </form>
-    <p class="status" id="create-status" role="status"></p>
-  </section>
+  <h1 id="admin-heading" hidden>管理</h1>
+  <p class="lead">チャンネルと、そこに入れる人</p>
 
   <!-- チャンネルごとの会員 / Members per channel -->
-  <div class="stack" id="channel-sections"></div>
+  <div id="channel-sections"></div>
+
+  <!-- チャンネル作成（サイト管理者）/ Create channel (site admin) -->
+  <section class="sec" id="create-view" hidden aria-labelledby="create-heading">
+    <div class="sec-h"><h2 id="create-heading">チャンネルを作成</h2></div>
+    <form class="row" id="create-form" novalidate>
+      <input class="in" id="create-login" autocomplete="off" maxlength="25" placeholder="Twitch ログイン" aria-label="Twitch ログイン" aria-describedby="create-error">
+      <input class="in" id="create-display" autocomplete="off" maxlength="100" placeholder="表示名（任意）" aria-label="表示名（任意）">
+      <button type="submit" class="btn pri" id="create-button">作成</button>
+    </form>
+    <p class="field-error" id="create-error" role="alert"></p>
+    <p class="status" id="create-status" role="status"></p>
+  </section>
 </main>
 
 <script src="/js/lib.js"></script>

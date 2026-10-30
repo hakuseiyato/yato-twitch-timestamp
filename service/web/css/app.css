@@ -524,6 +524,25 @@ main.doc.pop { display: flex; flex-direction: column; gap: 0; height: 100vh; pad
 .pop .listbox > .list-scroll { flex: 1 1 0; max-height: none; }
 .pop .status:not(:empty), .pop .field-error:not(:empty) { margin-top: 10px; }
 .pop .field-error:empty { min-height: 0; }
+/* ---- マイページ・管理 / My page and admin ---- */
+/* 見出しが隠れている間（403 のとき）は説明も隠す / Hide the lead while its heading is hidden (403) */
+h1[hidden] + .lead { display: none; }
+/* 入力 + ボタンの行: 入力が残りの幅を取る / Input + button rows: the inputs take the remaining width */
+.row > .in { flex: 1 1 0; }
+main.doc .sec > .row { margin-top: 14px; }
+.note > .muted { font-size: 12.5px; }
+.note .row { margin-top: 6px; }
+/* 表の最終行の追加フォーム / Add form in a table's last row */
+td > .in { width: 100%; }
+/* 会員表: 5 列 + 追加フォームを 680px に収めるため左右の余白と日時の字を詰める。login は途中で折らない（収まらなければ面の中で横スクロール）
+   Member table: tighter side padding and a smaller date to fit 5 columns + the add form in 680px; logins never break mid-word (the panel scrolls sideways instead) */
+.members th, .members td { padding-right: 10px; padding-left: 10px; white-space: nowrap; }
+.members td.num { font-size: 13.5px; }
+/* 狭い幅では表を面の中で横にスクロールさせる（切らない）/ On narrow screens the table scrolls sideways inside the panel instead of being clipped */
+main.doc .sec .panel { overflow-x: auto; }
+main.doc .sec .status:not(:empty), main.doc .sec .field-error:not(:empty) { margin-top: 10px; }
+main.doc .sec .field-error:empty { min-height: 0; }
+
 /* ---- 切り離したコメント一覧（旧）/ Detached comment list (old) ---- */
 main.popout { max-width: none; height: 100vh; padding: var(--space-md); gap: var(--space-sm); }
 .popout-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); }

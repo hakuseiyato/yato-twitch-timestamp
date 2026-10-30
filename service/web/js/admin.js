@@ -7,8 +7,8 @@
 (function () {
   const { api, errorText, formatDate, el, setStatus, busy, requireSession, renderHeader } = YTSApi;
   const $ = function (id) { return document.getElementById(id); };
-  const ROLE_TEXT = { owner: 'owner（管理） / owner', editor: 'editor（編集） / editor' };
-  const LOGIN_HINT = 'Twitch の login（英小文字・数字・_、25 文字まで）を入力してください / Enter a Twitch login (lowercase letters, digits, _; up to 25)';
+  const ROLE_TEXT = { owner: 'owner', editor: 'editor' };
+  const LOGIN_HINT = 'Twitch ログイン（英小文字・数字・_、25 文字まで）を入力してください';
 
   let me = null;
 
@@ -19,13 +19,13 @@
   // ---- 会員 / Members ----
 
   function memberRow(channel, member, status, reload) {
-    const button = el('button', { type: 'button', class: 'danger', text: '削除 / Remove' });
+    const button = el('button', { type: 'button', class: 'btn ghost danger', text: '削除' });
     button.addEventListener('click', async function () {
-      if (!confirm('「' + member.login + '」を ' + channel + ' から外しますか？\nRemove "' + member.login + '" from ' + channel + '?')) return;
+      if (!confirm('「' + member.login + '」を ' + channel + ' から外しますか？')) return;
       await busy(button, async function () {
         try {
           await api(channelPath(channel) + '/' + encodeURIComponent(member.login), { method: 'DELETE' });
-          setStatus(status, '削除しました / Removed', 'ok');
+          setStatus(status, '削除しました', 'ok');
           await reload(true);
         } catch (e) {
           setStatus(status, errorText(e), 'error');
@@ -34,29 +34,32 @@
     });
     return el('tr', null, [
       el('td', { text: member.login }),
-      el('td', { text: ROLE_TEXT[member.role] || member.role || '—' }),
-      el('td', { class: member.added_by ? null : 'muted', text: member.added_by || '—' }),
-      el('td', { class: 'num', text: formatDate(member.added_at) }),
+      el('td', { class: 'muted', text: ROLE_TEXT[member.role] || member.role || '—' }),
+      el('td', { class: 'muted', text: member.added_by || '—' }),
+      el('td', { class: 'muted num', text: formatDate(member.added_at) }),
       el('td', { class: 'actions' }, button)
     ]);
   }
 
+  // 追加フォーム。入力欄は表の最終行に置き、form 属性で行の外の <form> に結び付ける（<tr> の中に <form> は置けない）
+  // Add form. The fields sit in the table's last row and join the <form> outside it via the form attribute (a <form> cannot live inside a <tr>)
   function addForm(channel, status, reload) {
     const id = 'add-' + channel;
-    const loginInput = el('input', { id: id + '-login', autocomplete: 'off', maxlength: '25', 'aria-describedby': id + '-error' });
-    const roleSelect = el('select', { id: id + '-role' }, [
+    const formId = id + '-form';
+    const loginInput = el('input', { class: 'in', id: id + '-login', form: formId, autocomplete: 'off', maxlength: '25', placeholder: '追加する人のログイン', 'aria-label': '追加する人のログイン', 'aria-describedby': id + '-error' });
+    const roleSelect = el('select', { class: 'inline', id: id + '-role', form: formId, 'aria-label': '役割' }, [
       el('option', { value: 'editor', text: ROLE_TEXT.editor }),
       el('option', { value: 'owner', text: ROLE_TEXT.owner })
     ]);
-    const submit = el('button', { type: 'submit', class: 'primary', text: '追加 / Add' });
+    const submit = el('button', { type: 'submit', class: 'btn', form: formId, text: '追加' });
     const fieldError = el('p', { class: 'field-error', id: id + '-error', role: 'alert' });
-    const form = el('form', { novalidate: true }, [
-      el('div', { class: 'form-row' }, [
-        el('div', { class: 'field' }, [el('label', { for: loginInput.id, text: '追加する login / Login to add' }), loginInput]),
-        el('div', { class: 'field narrow' }, [el('label', { for: roleSelect.id, text: '役割 / Role' }), roleSelect]),
-        submit
-      ]),
-      fieldError
+    const form = el('form', { id: formId, novalidate: true }, fieldError);
+    const row = el('tr', null, [
+      el('td', null, loginInput),
+      el('td', null, roleSelect),
+      el('td'),
+      el('td'),
+      el('td', { class: 'actions' }, submit)
     ]);
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -71,21 +74,24 @@
         try {
           await api(channelPath(channel), { method: 'POST', body: { login: login, role: roleSelect.value } });
           loginInput.value = '';
-          setStatus(status, '追加しました / Added', 'ok');
+          setStatus(status, '追加しました', 'ok');
           await reload(true);
         } catch (e) {
           setStatus(status, errorText(e), 'error');
         }
       });
     });
-    return form;
+    return { form: form, row: row };
   }
 
-  // 1 チャンネル分の枠を作り、会員表を読み込む / Builds one channel's section and loads its member table
+  // 1 チャンネル分の節を作り、会員表を読み込む / Builds one channel's section and loads its member table
   function channelSection(channel) {
     const status = el('p', { class: 'status', role: 'status' });
-    const tableWrap = el('div', { class: 'table-wrap' });
-    const heading = channel.display_name ? channel.display_name + ' (' + channel.login + ')' : channel.login;
+    const add = addForm(channel.login, status, reload);
+    const tbody = el('tbody', null, add.row);
+    // 見出しは login。表示名が違えば薄く後ろに / The heading is the login, with a differing display name faint after it
+    const showDisplay = channel.display_name && channel.display_name !== channel.login;
+    const heading = showDisplay ? channel.login + ' ' + channel.display_name : channel.login;
 
     async function reload(keepStatus) {
       let members;
@@ -96,23 +102,30 @@
         return;
       }
       if (!keepStatus) setStatus(status, '');
-      tableWrap.replaceChildren(el('table', null, [
-        el('thead', null, el('tr', null, [
-          el('th', { scope: 'col', text: 'login' }),
-          el('th', { scope: 'col', text: '役割 / Role' }),
-          el('th', { scope: 'col', text: '追加した人 / Added by' }),
-          el('th', { scope: 'col', text: '追加日時 / Added at' }),
-          el('th', { scope: 'col' }, el('span', { class: 'muted', text: '操作 / Actions' }))
-        ])),
-        el('tbody', null, members.map(function (m) { return memberRow(channel.login, m, status, reload); }))
-      ]));
+      // 追加フォームの行は動かさず、その前の会員の行だけ差し替える（入力中のフォーカスを保つ）
+      // Replace only the member rows before the add row; the add row stays put so focus in it is kept
+      while (tbody.firstChild !== add.row) tbody.firstChild.remove();
+      add.row.before.apply(add.row, members.map(function (m) { return memberRow(channel.login, m, status, reload); }));
     }
 
-    const section = el('section', { class: 'card', 'data-channel': channel.login, 'aria-label': heading }, [
-      el('div', { class: 'card-head' }, el('h2', { text: heading })),
-      tableWrap,
-      addForm(channel.login, status, reload),
-      status
+    const section = el('section', { class: 'sec', 'data-channel': channel.login, 'aria-label': heading }, [
+      el('div', { class: 'sec-h' }, el('h2', null, [
+        channel.login,
+        showDisplay ? el('span', { class: 'faint', text: ' ' + channel.display_name }) : null
+      ])),
+      el('div', { class: 'panel' }, el('table', { class: 'members' }, [
+        el('thead', null, el('tr', null, [
+          el('th', { scope: 'col', text: 'Twitch ログイン' }),
+          el('th', { scope: 'col', text: '役割' }),
+          el('th', { scope: 'col', text: '追加した人' }),
+          el('th', { scope: 'col', text: '追加' }),
+          el('th', { scope: 'col', 'aria-label': '操作' })
+        ])),
+        tbody
+      ])),
+      add.form,
+      status,
+      el('p', { class: 'help', text: 'editor はスタンプの追加と自分の分の削除ができます。owner は他の人のスタンプも消せます。' })
     ]);
     reload();
     return section;
@@ -129,7 +142,7 @@
       return [];
     }
     if (channels.length === 0 && me.site_admin) {
-      container.replaceChildren(el('p', { class: 'empty', text: 'チャンネルはまだありません / No channels yet' }));
+      container.replaceChildren(el('div', { class: 'panel' }, el('p', { class: 'empty', text: 'チャンネルはまだありません' })));
     } else {
       container.replaceChildren.apply(container, channels.map(channelSection));
     }
@@ -154,7 +167,7 @@
         await api('/api/channels', { method: 'POST', body: { login: login, display_name: displayName || null } });
         loginInput.value = '';
         $('create-display').value = '';
-        setStatus($('create-status'), '作成しました / Created: ' + login, 'ok');
+        setStatus($('create-status'), '作成しました: ' + login, 'ok');
         await loadChannels();
       } catch (e) {
         setStatus($('create-status'), errorText(e), 'error');

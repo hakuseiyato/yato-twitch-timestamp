@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>マイページ / My page — Peakaboo</title>
+<title>マイページ — Peakaboo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/peakaboo-32.png">
 <link rel="apple-touch-icon" href="/icons/peakaboo-192.png">
@@ -15,39 +15,35 @@
 <body>
 <header class="site-header" id="site-header" hidden></header>
 
-<main>
-  <p class="status" id="boot-status" role="status">読み込み中… / Loading…</p>
+<main class="doc">
+  <p class="status" id="boot-status" role="status">読み込み中…</p>
 
-  <section class="card" id="account-view" hidden aria-labelledby="account-heading">
-    <h1 id="account-heading">マイページ / My page</h1>
-    <p>サインイン中 / Signed in as <strong id="me-login"></strong> <span class="muted" id="me-via"></span></p>
+  <section id="account-view" hidden aria-labelledby="account-heading">
+    <h1 id="account-heading">マイページ</h1>
+    <p class="lead"><span id="me-login"></span> としてサインイン中<span class="faint" id="me-via"></span></p>
   </section>
 
-  <section class="card" id="tokens-view" hidden aria-labelledby="tokens-heading">
-    <h2 id="tokens-heading">パネル用トークン / Panel tokens</h2>
-    <p class="muted">Premiere / After Effects のパネルからサーバーへ同期するときに使います / Used by the Premiere / After Effects panel to sync with the server</p>
+  <section class="sec" id="tokens-view" hidden aria-labelledby="tokens-heading">
+    <div class="sec-h"><h2 id="tokens-heading">パネル用トークン</h2></div>
+    <p class="help">Premiere / After Effects のパネルや Scout がサーバーに入るときの鍵です。1 台につき 1 つ発行してください。</p>
 
-    <form id="issue-form" novalidate>
-      <div class="form-row">
-        <div class="field">
-          <label for="token-label">ラベル（任意） / Label (optional)</label>
-          <input id="token-label" maxlength="100" autocomplete="off" placeholder="例: 編集用 PC / e.g. Editing PC">
-        </div>
-        <button type="submit" class="primary" id="issue-button">発行 / Issue</button>
-      </div>
+    <form class="row" id="issue-form" novalidate>
+      <input class="in" id="token-label" maxlength="100" autocomplete="off" placeholder="ラベル（例: 編集用 PC）" aria-label="ラベル（任意）">
+      <button type="submit" class="btn pri" id="issue-button">発行</button>
     </form>
 
-    <div class="reveal" id="token-reveal" hidden>
-      <p class="warning" role="alert">このトークンは今だけ表示されます。パネルに貼り付けてから閉じてください / This token is shown only once. Paste it into the panel before leaving.</p>
-      <div class="form-row">
-        <input id="token-value" readonly aria-label="発行したトークン / Issued token">
-        <button type="button" class="secondary" id="copy-button">コピー / Copy</button>
+    <!-- 1 回だけ表示するトークン / Token shown only once -->
+    <div class="note" id="token-reveal" hidden>
+      <p class="muted" role="alert">新しいトークン — いま一度だけ表示しています。貼り付けてから閉じてください</p>
+      <div class="row">
+        <input class="in mono" id="token-value" readonly aria-label="発行したトークン">
+        <button type="button" class="btn ghost" id="copy-button">コピー</button>
       </div>
       <p class="status" id="copy-status" role="status"></p>
     </div>
 
     <p class="status" id="tokens-status" role="status"></p>
-    <div class="table-wrap" id="token-list"></div>
+    <div id="token-list"></div>
   </section>
 </main>
 

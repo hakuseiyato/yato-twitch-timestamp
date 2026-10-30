@@ -7,15 +7,15 @@
   const $ = function (id) { return document.getElementById(id); };
 
   // 認証経路の表示名 / Display names of the auth routes
-  const VIA_TEXT = { session: 'Web', token: 'パネル用トークン / panel token', twitch: 'Twitch トークン / Twitch token' };
+  const VIA_TEXT = { session: 'Web', token: 'パネル用トークン', twitch: 'Twitch トークン' };
 
   async function revoke(token, button) {
     const name = token.label ? token.label + ' (' + token.prefix + ')' : token.prefix;
-    if (!confirm('トークン「' + name + '」を失効させますか？ このトークンを使うパネルは同期できなくなります。\nRevoke token "' + name + '"? Panels using it will stop syncing.')) return;
+    if (!confirm('トークン「' + name + '」を失効させますか？ このトークンを使うパネルは同期できなくなります。')) return;
     await busy(button, async function () {
       try {
         await api('/api/tokens/' + encodeURIComponent(token.prefix), { method: 'DELETE' });
-        setStatus($('tokens-status'), '失効させました / Revoked', 'ok');
+        setStatus($('tokens-status'), '失効させました', 'ok');
         await loadTokens(true);
       } catch (e) {
         setStatus($('tokens-status'), errorText(e), 'error');
@@ -23,14 +23,19 @@
     });
   }
 
+  // 1 行: ラベル（ID を薄く後ろに）/ 発行 / 最終使用 / 失効
+  // One row: label (ID faint after it) / created / last used / revoke
   function tokenRow(token) {
-    const button = el('button', { type: 'button', class: 'danger', text: '失効 / Revoke' });
+    const button = el('button', { type: 'button', class: 'btn ghost danger', text: '失効' });
     button.addEventListener('click', function () { revoke(token, button); });
     return el('tr', null, [
-      el('td', { class: 'mono', text: token.prefix }),
-      el('td', { class: token.label ? null : 'muted', text: token.label || '—' }),
-      el('td', { class: 'num', text: formatDate(token.created_at) }),
-      el('td', { class: 'num', text: token.last_used_at ? formatDate(token.last_used_at) : '未使用 / Never' }),
+      el('td', null, [
+        el('span', { class: token.label ? null : 'muted', text: token.label || '—' }),
+        ' ',
+        el('span', { class: 'faint mono', text: token.prefix })
+      ]),
+      el('td', { class: 'muted num', text: formatDate(token.created_at) }),
+      el('td', { class: 'muted num', text: token.last_used_at ? formatDate(token.last_used_at) : '未使用' }),
       el('td', { class: 'actions' }, button)
     ]);
   }
@@ -49,19 +54,18 @@
     }
     if (!keepStatus) setStatus(status, '');
     if (!tokens || tokens.length === 0) {
-      list.replaceChildren(el('p', { class: 'empty', text: '発行済みのトークンはありません / No tokens issued' }));
+      list.replaceChildren(el('div', { class: 'panel' }, el('p', { class: 'empty', text: '発行済みのトークンはありません' })));
       return;
     }
-    list.replaceChildren(el('table', null, [
+    list.replaceChildren(el('div', { class: 'panel' }, el('table', null, [
       el('thead', null, el('tr', null, [
-        el('th', { scope: 'col', text: 'ID' }),
-        el('th', { scope: 'col', text: 'ラベル / Label' }),
-        el('th', { scope: 'col', text: '発行日時 / Created' }),
-        el('th', { scope: 'col', text: '最終使用 / Last used' }),
-        el('th', { scope: 'col' }, el('span', { class: 'muted', text: '操作 / Actions' }))
+        el('th', { scope: 'col', text: 'ラベル' }),
+        el('th', { scope: 'col', text: '発行' }),
+        el('th', { scope: 'col', text: '最終使用' }),
+        el('th', { scope: 'col', 'aria-label': '操作' })
       ])),
       el('tbody', null, tokens.map(tokenRow))
-    ]));
+    ])));
   }
 
   async function issue(event) {
@@ -76,7 +80,7 @@
         $('token-label').value = '';
         $('token-value').focus();
         $('token-value').select();
-        setStatus($('tokens-status'), '発行しました / Issued', 'ok');
+        setStatus($('tokens-status'), '発行しました', 'ok');
         await loadTokens(true);
       } catch (e) {
         setStatus($('tokens-status'), errorText(e), 'error');
@@ -88,11 +92,11 @@
     const input = $('token-value');
     try {
       await navigator.clipboard.writeText(input.value);
-      setStatus($('copy-status'), 'コピーしました / Copied', 'ok');
+      setStatus($('copy-status'), 'コピーしました', 'ok');
     } catch (e) {
       input.focus();
       input.select();
-      setStatus($('copy-status'), 'コピーできませんでした。選択中の文字を手でコピーしてください / Copy failed; copy the selected text by hand', 'error');
+      setStatus($('copy-status'), 'コピーできませんでした。選択中の文字を手でコピーしてください', 'error');
     }
   }
 
@@ -107,7 +111,7 @@
     $('boot-status').hidden = true;
     renderHeader(me, '/me');
     $('me-login').textContent = me.login;
-    $('me-via').textContent = '(' + (VIA_TEXT[me.via] || me.via) + ')';
+    $('me-via').textContent = '（' + (VIA_TEXT[me.via] || me.via) + '）';
     $('account-view').hidden = false;
     $('tokens-view').hidden = false;
     $('issue-form').addEventListener('submit', issue);
