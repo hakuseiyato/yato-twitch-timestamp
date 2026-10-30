@@ -78,6 +78,23 @@ function ytsBuildComment(user, by, hasBy, id) {
     return s;
 }
 
+// Same logic as isCandidate / shortSequenceName in panel/js/lib.js.
+// Update both implementations when this logic changes.
+// memo が候補の印（候補: / 候補：）で始まるか / Whether the memo starts with the candidate prefix.
+function ytsIsCandidate(memo) {
+    return /^\s*候補[:：]/.test(String(memo || ""));
+}
+
+// Short 用 Sequence 名: Short_NN_本文（印と " | " 以降を除き、使えない文字を消して 20 文字まで）
+// Short sequence name: Short_NN_body (drops the prefix and everything from " | ", strips unsafe characters, max 20 chars).
+function ytsShortName(memo, n) {
+    var body = String(memo || "").replace(/^\s*候補[:：]\s*/, "").split(" | ")[0]
+        .replace(/[\\\/:*?"<>|\u0000-\u001f]/g, "").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").substring(0, 20);
+    var num = String(n);
+    while (num.length < 2) num = "0" + num;
+    return body ? "Short_" + num + "_" + body : "Short_" + num;
+}
+
 function ytsMarkerArray(markers) {
     var result = [];
     var marker = markers.getFirstMarker();
@@ -614,11 +631,14 @@ function ytsApply(ops) {
         fps = 254016000000 / parseFloat(seq.timebase);
         tolerance = isFinite(fps) && fps > 0 ? 0.5 / fps : 0;
 
+        // Premiere の色番号: 0 緑 1 赤 2 紫 3 橙 4 黄 5 白 6 青 7 水色。黄は Scout の候補専用にする
+        // Premiere colour indices: 0 green 1 red 2 purple 3 orange 4 yellow 5 white 6 blue 7 cyan. Yellow is reserved for Scout candidates.
         var colorFor = function (item) {
+            if (ytsIsCandidate(item.memo)) return 4;
             if (item["native"]) return 0;
             colorKey = "k_" + String(item.by || "");
             if (typeof colorMap[colorKey] === "undefined") {
-                colorMap[colorKey] = (colorCounter % 7) + 1;
+                colorMap[colorKey] = [1, 2, 3, 5, 6, 7][colorCounter % 6];
                 colorCounter += 1;
             }
             return colorMap[colorKey];
@@ -702,4 +722,136 @@ function ytsApply(ops) {
     } catch (e) {
         return "ERR|同期処理を開始できませんでした: " + e.toString();
     }
+}
+
+// フル尺 Sequence のマーカー 1 つごとに Short 用 Sequence を作る。クリップは動かさず、元の In/Out は最後に戻す
+// Creates one Short sequence per marker of the active full-length sequence. Clips are never moved; the original In/Out is restored at the end.
+// p = { preSec, postSec, includeHuman, binName, prefix }
+function ytsCreateShorts(p) {
+    var TICKS_PER_SEC = 254016000000;
+    var seq = app.project ? app.project.activeSequence : null;
+    var created = 0;
+    var names = [];
+    var skipped = 0;
+    var usedNames = {};
+    var targets = [];
+    var origIn = NaN;
+    var origOut = NaN;
+    var result;
+    var restoreError = null;
+    var preSec;
+    var postSec;
+    var binName;
+    var seqEndSec;
+    var allSequences;
+    var list;
+    var i;
+    var j;
+    var n;
+    var name;
+    var inSec;
+    var outSec;
+    var sub;
+    var subMarkers;
+    var bin = null;
+    var root;
+    var child;
+    // Premiere 26 で確実に効くのは ticks で作った Time / A Time built from ticks is the form known to work in Premiere 26.
+    var toTime = function (sec) {
+        var t = new Time();
+        t.ticks = String(Math.round(sec * TICKS_PER_SEC));
+        return t;
+    };
+    if (!seq) return "ERR|アクティブなシーケンスがありません / No active sequence";
+    p = p || {};
+    preSec = Number(p.preSec);
+    postSec = Number(p.postSec);
+    if (!isFinite(preSec) || preSec < 0 || !isFinite(postSec) || postSec <= 0) {
+        return "ERR|前後の秒数を確認してください / Check the before/after seconds";
+    }
+    binName = String(p.binName || "Peakaboo_Shorts");
+    try {
+        origIn = parseFloat(seq.getInPoint());
+        origOut = parseFloat(seq.getOutPoint());
+        seqEndSec = parseFloat(seq.end) / TICKS_PER_SEC;
+        if (!isFinite(seqEndSec) || seqEndSec <= 0) throw new Error("シーケンスの長さを読めません / Could not read the sequence length");
+
+        list = ytsMarkerArray(seq.markers);
+        for (i = 0; i < list.length; i += 1) {
+            if (!ytsMarkerId(list[i])) continue;
+            if (!p.includeHuman && !ytsIsCandidate(list[i].name)) continue;
+            targets.push({ t: Number(list[i].start.seconds), name: String(list[i].name || "") });
+        }
+        targets.sort(function (a, b) { return a.t - b.t; });
+
+        allSequences = app.project.sequences;
+        for (i = 0; i < allSequences.numSequences; i += 1) usedNames["n_" + allSequences[i].name] = true;
+
+        for (i = 0; i < targets.length; i += 1) {
+            inSec = Math.max(0, targets[i].t - preSec);
+            outSec = Math.min(seqEndSec, targets[i].t + postSec);
+            if (!(outSec > inSec)) {
+                skipped += 1;
+                continue;
+            }
+            n = created + 1;
+            name = ytsShortName(targets[i].name, n);
+            while (usedNames["n_" + name]) {
+                n += 1;
+                name = ytsShortName(targets[i].name, n);
+            }
+            seq.setInPoint(toTime(inSec));
+            seq.setOutPoint(toTime(outSec));
+            // true = トラックのターゲット指定を無視して全トラックを含める / true = ignore track targeting and include every track
+            sub = seq.createSubsequence(true);
+            if (!sub || typeof sub !== "object") throw new Error("createSubsequence");
+            sub.name = name;
+            usedNames["n_" + name] = true;
+            names.push(name);
+            created += 1;
+
+            // [yts:<id>] が残ると同期で元のスタンプを動かすので、作った Sequence のマーカーは全部消す
+            // Delete every marker in the new sequence; a surviving [yts:<id>] tag would make sync move the original stamp.
+            try {
+                subMarkers = sub.markers;
+                if (subMarkers) {
+                    list = ytsMarkerArray(subMarkers);
+                    for (j = 0; j < list.length; j += 1) subMarkers.deleteMarker(list[j]);
+                }
+            } catch (markerError) {}
+
+            if (!bin) {
+                root = app.project.rootItem;
+                for (j = 0; j < root.children.numItems; j += 1) {
+                    child = root.children[j];
+                    if (child && child.type === ProjectItemType.BIN && child.name === binName) {
+                        bin = child;
+                        break;
+                    }
+                }
+                if (!bin) bin = root.createBin(binName) || null;
+            }
+            if (bin && sub.projectItem) sub.projectItem.moveBin(bin);
+        }
+        result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped });
+    } catch (e) {
+        result = "ERR|" + created + " 件作成後に失敗 / Failed after creating " + created + ": " + e.toString();
+    } finally {
+        // In と Out の両方が読めたときだけ戻す。In を 2 回置くのは、途中の In/Out と前後が入れ替わって弾かれるのを避けるため
+        // Restore only when both In and Out were read. In is set twice so a reversed intermediate In/Out order cannot reject it.
+        if (isFinite(origIn) && origIn >= 0 && isFinite(origOut) && origOut > 0) {
+            try {
+                seq.setInPoint(toTime(origIn));
+                seq.setOutPoint(toTime(origOut));
+                seq.setInPoint(toTime(origIn));
+            } catch (restoreFailure) { restoreError = restoreFailure; }
+        }
+        // createSubsequence が新しい Sequence を開く場合に備えて元へ戻す / Switch back in case createSubsequence opened the new sequence.
+        try { app.project.activeSequence = seq; } catch (activateError) {}
+    }
+    if (restoreError) {
+        return "ERR|" + created + " 件作成しましたが In/Out を戻せませんでした / Created " + created +
+            ", but could not restore In/Out: " + restoreError.toString();
+    }
+    return result;
 }

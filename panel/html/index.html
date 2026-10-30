@@ -51,6 +51,20 @@
       <button id="exportFramesBtn" class="small secondary icon-button" type="button" title="全マーカーを画像で書き出す" aria-label="全マーカーを画像で書き出す" disabled>
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"></path></svg>
       </button>
+      <div class="shorts-control">
+        <button id="shortsBtn" class="small secondary icon-button" type="button" title="候補から Sequence を作る / Create Short sequences" aria-label="候補から Sequence を作る" aria-haspopup="dialog" aria-expanded="false" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1.5"></rect><path d="M6 5.5v5l4-2.5z"></path></svg>
+        </button>
+        <div id="shortsPopover" class="offset-popover shorts-popover" role="dialog" aria-label="Short Sequence" hidden>
+          <label class="server-field"><span>前 / Before (s)</span><input id="shortsPre" type="number" min="0" step="1" value="15"></label>
+          <label class="server-field"><span>後 / After (s)</span><input id="shortsPost" type="number" min="1" step="1" value="45"></label>
+          <label class="shorts-check"><input id="shortsIncludeHuman" type="checkbox"> 人のマーカーも / Include human markers</label>
+          <div class="server-buttons">
+            <button id="shortsCreate" class="primary" type="button">作成 / Create</button>
+            <button id="shortsClose" class="secondary" type="button">閉じる / Close</button>
+          </div>
+        </div>
+      </div>
       <button id="refreshBtn" class="small secondary icon-button" type="button" title="更新" aria-label="更新">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5V1.5L11.6 3A6 6 0 1 0 14 8"></path><path d="M13 1.5H9.5"></path></svg>
       </button>

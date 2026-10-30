@@ -21,6 +21,13 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     serverStream: document.getElementById('serverStream'),
     serverOpen: document.getElementById('serverOpen'),
     exportFramesBtn: document.getElementById('exportFramesBtn'),
+    shortsBtn: document.getElementById('shortsBtn'),
+    shortsPopover: document.getElementById('shortsPopover'),
+    shortsPre: document.getElementById('shortsPre'),
+    shortsPost: document.getElementById('shortsPost'),
+    shortsIncludeHuman: document.getElementById('shortsIncludeHuman'),
+    shortsCreate: document.getElementById('shortsCreate'),
+    shortsClose: document.getElementById('shortsClose'),
     stream: document.getElementById('stream'),
     offsetBtn: document.getElementById('offsetBtn'),
     offsetLabel: document.getElementById('offsetLabel'),
@@ -52,7 +59,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     markerList: document.getElementById('markerList')
   };
   const storageKey = 'yts.csvPath.' + hostApp;
-  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.serverBtn, elements.exportFramesBtn, elements.stream, elements.offsetBtn, elements.linkTarget,
+  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.serverBtn, elements.exportFramesBtn, elements.shortsBtn, elements.shortsCreate, elements.stream, elements.offsetBtn, elements.linkTarget,
     elements.refreshBtn, elements.addUntagged, elements.addMarkerBtn, elements.syncBtn, elements.executeBtn];
   const offsetControls = [elements.offsetInput, elements.offsetMinusSec, elements.offsetPlusSec,
     elements.offsetMinusFrame, elements.offsetPlusFrame, elements.offsetReset];
@@ -112,6 +119,9 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
 
   // ponytail: no eviction; add LRU cleanup if the cache grows too large
   // ponytail: Replacing a source video during this session can leave stale thumbnails because mtimes are memoized.
+
+  // AE にはシーケンスが無いので Shorts ボタンを出さない / After Effects has no sequences, so the Shorts button is hidden.
+  elements.shortsBtn.hidden = hostApp !== 'PPRO';
 
   elements.linkTarget.title = hostApp === 'PPRO'
     ? 'アクティブなシーケンスに紐付け'
@@ -222,6 +232,30 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   function closeOffsetPopover() {
     elements.offsetPopover.hidden = true;
     elements.offsetBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  // 「候補から Sequence を作る」の前後秒数はパネルを閉じても覚えておく / The Shorts before/after seconds survive panel restarts.
+  const shortsStorageKeys = { pre: 'yts.shorts.pre', post: 'yts.shorts.post' };
+
+  function closeShortsPopover() {
+    elements.shortsPopover.hidden = true;
+    elements.shortsBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  async function createShorts() {
+    const pre = Number(elements.shortsPre.value), post = Number(elements.shortsPost.value);
+    if (!(pre >= 0) || !(post > 0)) { setStatus('前後の秒数を確認してください / Check the before/after seconds', 'error'); return; }
+    try {
+      localStorage.setItem(shortsStorageKeys.pre, String(pre));
+      localStorage.setItem(shortsStorageKeys.post, String(post));
+    } catch (error) {}
+    setBusy(true);
+    try {
+      const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, binName: 'Peakaboo_Shorts', prefix: 'Short_' }) + ')', true);
+      setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件は範囲外' : '') +
+        ' / Created ' + out.created + ' sequences (Peakaboo_Shorts)' + (out.skipped ? ', ' + out.skipped + ' out of range' : ''), out.created ? 'ok' : '');
+      closeShortsPopover();
+    } catch (error) { setStatus(messageOf(error), 'error'); } finally { setBusy(false); }
   }
 
   function hostLiteral(value) {
@@ -436,6 +470,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     updateServerControls();
     elements.exportFramesBtn.disabled = busy || !lastMarkerDetails || !lastMarkerDetails.markers.length;
     elements.exportFramesBtn.title = '全マーカーを画像で書き出す（保存先を選択）';
+    elements.shortsBtn.disabled = busy || hostApp !== 'PPRO' || !activeInfo || !activeInfo.hasTarget;
+    elements.shortsCreate.disabled = busy;
     elements.refreshBtn.disabled = busy;
     elements.stream.disabled = busy || !groups.length || linked;
     elements.stream.hidden = !(groups.length >= 2 && !activeEntry);
@@ -2401,6 +2437,40 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.mergeCsv.addEventListener('click', pickMergeCsv);
     if (serverReady) bindServerEvents();
     elements.exportFramesBtn.addEventListener('click', exportAllFrames);
+    elements.shortsBtn.addEventListener('click', function () {
+      const opening = elements.shortsPopover.hidden;
+      elements.shortsPopover.hidden = !opening;
+      elements.shortsBtn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      if (opening) {
+        elements.shortsPre.focus();
+        elements.shortsPre.select();
+      }
+    });
+    elements.shortsCreate.addEventListener('click', createShorts);
+    elements.shortsClose.addEventListener('click', closeShortsPopover);
+    // 入力中のキーを Premiere のショートカットに渡さない。Enter で作成、Escape で閉じる
+    // Keep typed keys away from Premiere shortcuts; Enter creates, Escape closes.
+    [elements.shortsPre, elements.shortsPost].forEach(function (input) {
+      ['keydown', 'keyup', 'keypress'].forEach(function (eventName) {
+        input.addEventListener(eventName, function (event) {
+          event.stopPropagation();
+          if (eventName !== 'keydown' || event.isComposing || event.keyCode === 229) return;
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            if (!elements.shortsCreate.disabled) createShorts();
+          } else if (event.key === 'Escape') {
+            closeShortsPopover();
+          }
+        });
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !elements.shortsPopover.hidden) closeShortsPopover();
+    });
+    document.addEventListener('click', function (event) {
+      if (!elements.shortsPopover.hidden && !elements.shortsPopover.contains(event.target) &&
+          !elements.shortsBtn.contains(event.target)) closeShortsPopover();
+    });
     elements.refreshBtn.addEventListener('click', async function () {
       await refreshTarget(true);
       await refreshMarkers();
@@ -2484,6 +2554,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   }
 
   bindEvents();
+  try {
+    const storedPre = localStorage.getItem(shortsStorageKeys.pre);
+    const storedPost = localStorage.getItem(shortsStorageKeys.post);
+    if (storedPre && Number(storedPre) >= 0) elements.shortsPre.value = storedPre;
+    if (storedPost && Number(storedPost) > 0) elements.shortsPost.value = storedPost;
+  } catch (storageError) {}
   updateLinkState(false);
   updateOffsetDisplay();
   updateControls();

@@ -54,6 +54,12 @@ button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-all
 .server-field input, .server-field select { width: 100%; min-width: 0; color: var(--text); }
 .server-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .server-buttons button, .server-picker button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「候補から Sequence を作る」のポップオーバー（オフセットと同じ形） / The "Create Short sequences" popover (same pattern as the offset one) */
+.shorts-control { position: relative; flex: none; }
+/* ボタンがツールバーの右寄りにあるので右端揃えで開く（左揃えだと狭いパネルではみ出す） / Opens right-aligned: the button sits towards the right, so left alignment overflows narrow panels */
+.shorts-popover { left: auto; right: 0; width: min(220px, calc(100vw - 16px)); white-space: normal; }
+.shorts-check { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--secondary); cursor: pointer; }
+.shorts-popover .shorts-check input { flex: none; width: auto; margin: 0; }
 .server-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .server-picker > button { width: 100%; }
 .checkbox-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 4px 0; color: var(--secondary); cursor: pointer; }

@@ -1123,4 +1123,23 @@ assert.strictEqual(TSLib.shortSequenceName('   ', 1), 'Short_01');
 assert.strictEqual(TSLib.shortSequenceName('あいうえおかきくけこさしすせそたちつてとなにぬ', 7), 'Short_07_あいうえおかきくけこさしすせそたちつてと');
 assert.strictEqual(TSLib.shortSequenceName('x', 100), 'Short_100_x');
 assert.strictEqual(TSLib.shortSequenceName('候補： 笑い | x', 2), 'Short_02_笑い');
+// ppro.jsx の写し（ytsShortName / ytsIsCandidate）が lib.js と同じ結果を返すこと
+// The ppro.jsx copies (ytsShortName / ytsIsCandidate) must match lib.js.
+{
+  const jsxSource = fs.readFileSync(path.resolve(__dirname, '../panel/jsx/ppro.jsx'), 'utf8');
+  const extract = function (name) {
+    const start = jsxSource.indexOf('function ' + name + '(');
+    assert.ok(start >= 0, name + ' is missing in ppro.jsx');
+    return jsxSource.slice(start, jsxSource.indexOf('\n}', start) + 2);
+  };
+  const jsx = new Function(extract('ytsIsCandidate') + '\n' + extract('ytsShortName') +
+    '\nreturn { isCandidate: ytsIsCandidate, shortName: ytsShortName };')();
+  const memos = ['候補: 笑い・チャット急増 | ハハハ やばい', 'a/b:c*d?e"f<g>h|i', '   ', '',
+    'あいうえおかきくけこさしすせそたちつてとなにぬ', 'x', '候補： 笑い | x', '  候補:x', '候補 笑い', 'a\tb\u0001c   d',
+    null];
+  for (const memo of memos) {
+    for (const n of [1, 9, 12, 100]) assert.strictEqual(jsx.shortName(memo, n), TSLib.shortSequenceName(memo, n), String(memo));
+    assert.strictEqual(jsx.isCandidate(memo), TSLib.isCandidate(memo), String(memo));
+  }
+}
 console.log('all tests passed');
