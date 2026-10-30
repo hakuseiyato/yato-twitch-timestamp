@@ -159,6 +159,12 @@ What "同期" does with a server stream:
 - **Per-record results.** `stale` is not a failure: the server already has the same or a newer version, so it counts as sent. Other rejections are shown as "送れなかった n 件: <reason> / failed n" with the reasons listed under [Server sync](#サーバーと同期--server-sync). For `forbidden_tombstone` ("他の人の記録は消せません / cannot delete others' records"), you deleted a marker recorded by someone else; only its author (or a channel owner on the web) can delete it on the server. The panel remembers the id, and the next "同期" restores the server's record into the mirror CSV and puts the marker back.
 - **Recorder.** Records created by the panel ("＋追加", and markers picked up by "同期") get your Twitch login from `/api/me` as `by` instead of `premiere` / `ae`.
 
+Limits:
+
+- 鏡 CSV を Excel 等で直接編集してもサーバーには届きません。編集は Premiere / After Effects のマーカーか Web で行ってください / Edits made directly to the mirror CSV do not reach the server; edit through the markers in Premiere Pro / After Effects or on the web.
+- 古い同期 CSV をサーバーへ上げるには、Chrome 拡張の「CSV を取り込む」を使います（拡張がサーバーへ送ります）。パネルの「統合」はサーバーの配信では使えません / To upload an old sync CSV, use "CSV を取り込む" in the Chrome extension (the extension sends it to the server). The panel's "統合" is disabled while a server stream is open.
+- スタンプが 0 件の配信も開けます。「＋追加」で最初の印を付けてください / A stream with no stamps can be opened too ("サーバーの配信を開きました（スタンプ 0 件）"); add the first marker with "＋追加", then "同期".
+
 Errors:
 
 - "トークンが無効です。Web の /me で発行し直してください / Token invalid. Issue a new one on /me" (401): the token was revoked or mistyped. Issue a new one on `/me`, enter it under "サーバー", and click "接続 / Connect".

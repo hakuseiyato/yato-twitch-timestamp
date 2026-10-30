@@ -983,6 +983,9 @@ const TSLib = (function () {
         if (!streamTemplate) streamTemplate = record;
       }
     }
+    // CSV にこの配信の行が無ければ呼び出し側の {channel, started_at} を使う（スタンプ 0 件のサーバー配信）
+    // Without rows of this stream in the CSV, use the caller's {channel, started_at} (a server stream with zero stamps).
+    if (!streamTemplate && source.streamTemplate) streamTemplate = source.streamTemplate;
     const crossStreamOnly = new Set();
     for (const id of idsInOtherStreams) {
       if (!streamRecords.has(id)) crossStreamOnly.add(id);

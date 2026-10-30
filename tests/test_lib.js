@@ -469,6 +469,19 @@ assert.strictEqual(added.channel, 'alpha');
 assert.strictEqual(added.started_at, '2026-01-01T00:00:00Z');
 assert.strictEqual(result.appOps[0].op, 'tag');
 assert.strictEqual(result.appOps[0].index, 7);
+// streamTemplate: CSV にその配信の行が無いとき（スタンプ 0 件のサーバー配信）、新しい記録の channel / started_at を補う
+// streamTemplate: fills channel / started_at of new records when the CSV has no rows of the stream (a server stream with zero stamps).
+const template = { channel: 'beta', started_at: '2026-02-01T00:00:00Z' };
+result = plan({ appMarkers: [{ index: 0, id: 'y000000d', t: 4, memo: 'first' }], hostName: 'yato', streamTemplate: template });
+assert.strictEqual(result.records.length, 1);
+assert.strictEqual(result.records[0].channel, 'beta');
+assert.strictEqual(result.records[0].started_at, '2026-02-01T00:00:00Z');
+assert.strictEqual(result.records[0].by, 'yato');
+result = plan({ appMarkers: [{ index: 0, id: null, t: 4, memo: '' }], addUntagged: true, streamTemplate: template });
+assert.strictEqual(result.records[0].channel, 'beta');
+// CSV に行があればそちらが優先 / Rows in the CSV win over the template
+result = plan({ records: [record('0000000c', 5, '')], appMarkers: [{ index: 0, id: 'y000000d', t: 4, memo: '' }], streamTemplate: template });
+assert.strictEqual(result.records.find(function (item) { return item.id === 'y000000d'; }).channel, 'alpha');
 result = plan({ appMarkers: [{ index: 0, id: null, t: 10, memo: '' }], addUntagged: false });
 assert.strictEqual(result.records.length, 0);
 assert.strictEqual(result.appOps.length, 0);

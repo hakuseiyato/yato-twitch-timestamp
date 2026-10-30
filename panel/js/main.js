@@ -105,6 +105,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let serverPulled = { path: '', byId: new Map() };
   // pull の結果を同期の完了メッセージに添える / The pull result, added to the sync's completion message
   let serverSyncNote = '';
+  const ZERO_STAMPS_MESSAGE = 'サーバーの配信を開きました（スタンプ 0 件）/ Opened server stream (no stamps yet)';
 
   thumbnailVideo.muted = true;
   thumbnailVideo.preload = 'auto';
@@ -423,7 +424,14 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     const linked = !!activeEntry;
     elements.pickCsv.disabled = busy;
     elements.newCsv.disabled = busy; // the active target is re-read when clicked
-    elements.mergeCsv.disabled = busy || !csvFilePath;
+    // 鏡 CSV への統合はサーバーへ届かないので無効にする（古い CSV は拡張の「CSV を取り込む」で送る）
+    // Merging into a mirror never reaches the server, so it is disabled (old CSVs go through the extension's import).
+    const mirrorOpen = isServerMirror(csvFilePath);
+    elements.mergeCsv.disabled = busy || !csvFilePath || mirrorOpen;
+    elements.mergeCsv.title = mirrorOpen
+      ? 'サーバーの配信では統合できません。古い CSV は Chrome 拡張の「CSV を取り込む」でサーバーへ送ってください / ' +
+        'Merging is disabled for server streams. Import old CSVs through the Chrome extension so they reach the server'
+      : 'ほかの CSV を同期ファイルに統合（複数選択可）';
     elements.serverBtn.disabled = busy || !serverReady;
     updateServerControls();
     elements.exportFramesBtn.disabled = busy || !lastMarkerDetails || !lastMarkerDetails.markers.length;
@@ -516,6 +524,10 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       if (TSLib.detectCsvFormat(text).format !== 'sync') throw notSyncFormatError(path);
       const parsed = TSLib.parseCsv(text);
       groups = TSLib.groupByStream(parsed.records);
+      // スタンプ 0 件のサーバー配信は meta から配信を 1 つ作る（紐付けて「＋追加」で最初の印を付けられる）
+      // A server stream with zero stamps gets one stream from its meta (so it can be linked and the first marker added).
+      const emptyGroup = !groups.length && isServerMirror(path) ? emptyMirrorGroup(path) : null;
+      if (emptyGroup) groups = [emptyGroup];
       csvById = new Map();
       parsed.records.forEach(function (record) {
         if (record.id) csvById.set(record.id, record);
@@ -530,7 +542,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       updateTargetDisplay(readSidecar(getSidecarPath(path)));
       const skipped = Array.isArray(parsed.skipped) ? parsed.skipped.length : Number(parsed.skipped) || 0;
       if (!groups.length) throw new Error('有効なタイムスタンプがありません');
-      const loadMessage = basename(path) + ': ' + groups.length + ' 件の配信を読み込みました' +
+      const loadMessage = emptyGroup ? ZERO_STAMPS_MESSAGE : basename(path) + ': ' + groups.length + ' 件の配信を読み込みました' +
         (skipped ? '（スキップ ' + skipped + ' 行）' : '');
       setStatus(loadMessage, 'ok');
     } catch (error) {
@@ -1660,7 +1672,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       now: state.now,
       choices: choices,
       addUntagged: state.addUntagged,
-      hostName: newRecordBy(state.path)
+      hostName: newRecordBy(state.path),
+      streamTemplate: newRecordStream(state.path)
     });
     renderPreview();
   }
@@ -1791,7 +1804,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       now: previewState.now,
       choices: choices,
       addUntagged: previewState.addUntagged,
-      hostName: newRecordBy(previewState.path)
+      hostName: newRecordBy(previewState.path),
+      streamTemplate: newRecordStream(previewState.path)
     });
     return previewState;
   }
@@ -2072,6 +2086,20 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     return (meta && meta.me) || (hostApp === 'PPRO' ? 'premiere' : 'ae');
   }
 
+  // 新しく作る記録の channel / started_at の補い。鏡なら meta の値（CSV にこの配信の行が無いときだけ syncPlan が使う）
+  // Fallback channel / started_at for new records: the meta's for a mirror (syncPlan uses it only when the CSV has no rows of the stream).
+  function newRecordStream(csvPath) {
+    const meta = isServerMirror(csvPath) ? readServerMeta(csvPath) : null;
+    return meta ? { channel: meta.channel, started_at: meta.started_at || '' } : null;
+  }
+
+  // 記録が 0 件の鏡でも配信を選べるよう、meta から groupByStream と同じ形の空のグループを作る
+  // Builds an empty group shaped like groupByStream's from the meta, so a mirror with zero records can still be selected.
+  function emptyMirrorGroup(csvPath) {
+    const meta = readServerMeta(csvPath);
+    return meta ? { stream_id: meta.stream_id, channel: meta.channel, started_at: meta.started_at || '', records: [], allRecords: [] } : null;
+  }
+
   // 鏡 CSV と今のサーバー設定が同じサーバーか（別のサーバーへ同じ stream_id を送らない）
   // Whether the mirror CSV and the current server settings point at the same server (never send a stream_id to another server).
   function assertMirrorServer(meta) {
@@ -2276,9 +2304,14 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
       const serverRecords = await YTSServer.pullStamps(stream.stream_id);
       const exists = pathExists(mirrorPath);
       const localRecords = exists ? TSLib.parseCsv(readText(mirrorPath)).records : [];
-      merged = TSLib.mergeServerRecords(localRecords, serverRecords);
-      if (merged.changed || !exists) atomicWrite(mirrorPath, TSLib.toCsv(merged.records));
+      // 開き直しでも、直前の push で forbidden_tombstone だった id はサーバーの生存記録で戻す（pullIntoMirror と同じ）。
+      // 取り込めたら forcePull は消す（新しい meta に書かない）。記録が 0 件でも見出しだけの CSV と meta を書く
+      // On re-open too, ids rejected as forbidden_tombstone come back from the server (as in pullIntoMirror); after a
+      // successful pull forcePull is dropped (not written to the new meta). With zero records a header-only CSV and the meta are still written.
       const previous = readServerMeta(mirrorPath);
+      const forceIds = previous && Array.isArray(previous.forcePull) ? previous.forcePull : [];
+      merged = TSLib.mergeServerRecords(localRecords, serverRecords, { forceIds: forceIds });
+      if (merged.changed || !exists) atomicWrite(mirrorPath, TSLib.toCsv(merged.records));
       writeServerMeta(mirrorPath, {
         serverUrl: settings.serverUrl,
         stream_id: stream.stream_id,
@@ -2299,8 +2332,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     await loadCsvPath(mirrorPath, true);
     let opened = '';
     if (csvFilePath === mirrorPath && groups.length) {
-      opened = 'サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
-        merged.changed + ' merged）';
+      opened = merged.records.length ? 'サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
+        merged.changed + ' merged）' : ZERO_STAMPS_MESSAGE;
       setStatus(opened, 'ok');
     }
     await refreshMarkers();
