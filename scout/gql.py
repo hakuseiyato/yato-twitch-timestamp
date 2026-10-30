@@ -14,8 +14,9 @@ GQL_URL = 'https://gql.twitch.tv/gql'
 CLIENT_ID = 'kd1unb4b3q4t58fwlpcbzcbnm76a8fp'
 _TIMEOUT_SEC = 20
 # status は配信中 RECORDING、終了後 RECORDED / status is RECORDING while live, RECORDED after
+# 20 本: Web から数日前の配信を要求されても VOD を引けるように / 20 so a request for an older stream still finds its VOD
 QUERY = ('query($login: String!) { user(login: $login) { stream { id title createdAt } '
-         'videos(first: 3, sort: TIME) { edges { node { id title lengthSeconds createdAt status } } } } }')
+         'videos(first: 20, sort: TIME) { edges { node { id title lengthSeconds createdAt status } } } } }')
 
 
 def parse_snapshot(response: dict) -> dict:

@@ -6,6 +6,11 @@ Steps run in night_lib.STEP_ORDER; finished steps are kept as 'done' in state.js
 
 単発 / One-shot: `python -I scout/night.py --vod <id> [--force] [--footage-root <dir>] [--config <night.config.json>]`
 戻りコード / Exit codes: 0 = 全段済み / all steps done、1 = 失敗で止まった / stopped on a failure、2 = 起動時のエラー / startup error
+
+常駐 / Daemon: `python -I scout/night.py --daemon [--footage-root <dir>]`（60 秒ごとに Web の要求、poll_minutes ごとに GQL）
+1 周だけ / One tick: `python -I scout/night.py --tick [--footage-root <dir>]`（試験用 / for testing）
+戻りコード / Exit codes: 0 = 終了 / done、1 = 周で例外 / the tick raised、2 = 起動時のエラー（トークン無しなど）/ startup error、
+3 = 別の常駐が動いている / another daemon holds the lock
 """
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ import sys
 import time
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -35,6 +41,8 @@ log.addHandler(logging.NullHandler())  # ハンドラ未設定でも stderr に�
 
 HERE = Path(__file__).resolve().parent
 NIGHT_DIR = Path(os.path.expandvars(r'%LOCALAPPDATA%\peakaboo\night'))
+LOCK_PATH = NIGHT_DIR / 'daemon.lock'
+TICK_SEC = 60
 LIVE_HISTORY_MAX = 20
 MAX_FAILURES = 3
 _REASON_MAX = 200
@@ -498,7 +506,7 @@ def setup_logging() -> None:
 
 
 def find_vod(login: str, vod_id: str) -> dict:
-    """GQL の最新 VOD（3 本）から id で探す / Find the VOD by id among the newest three from GQL.
+    """GQL の最新 VOD（20 本）から id で探す / Find the VOD by id among the newest 20 from GQL.
 
     Raises
     ------
@@ -510,17 +518,235 @@ def find_vod(login: str, vod_id: str) -> dict:
             if video.get('status') != 'RECORDED':
                 raise ValueError(f'VOD {vod_id} はまだ録画中です（{video.get("status")}）')
             return video
-    raise ValueError(f'VOD {vod_id} が {login} の最新 3 本に見つかりません')
+    raise ValueError(f'VOD {vod_id} が {login} の最新 20 本に見つかりません')
+
+
+
+@dataclass
+class LoopContext:
+    """常駐が周をまたいで持つもの / What the daemon keeps across ticks.
+
+    adopt_running は最初の周だけ True（前の常駐が処理中に落ちた行を拾い直す）。
+    adopt_running is True only on the first tick (re-takes rows a dead daemon left running).
+    """
+    client: api.Client
+    cfg: dict
+    night_cfg: dict
+    state: State
+    footage_root: Path
+    notify: Callable[[str], None]
+    scout_config_path: Path = HERE / 'scout.config.json'
+    last_poll: datetime | None = None
+    adopt_running: bool = True
+
+
+def _patch_row(client: api.Client, stream_id: str, body: dict) -> None:
+    """配信行を PATCH する。失敗はログだけで job を止めない / PATCH a stream row; failures are only logged."""
+    try:
+        client.patch(f'/api/streams/{scout.seg(stream_id)}', body)
+    except (api.ApiError, OSError) as e:
+        log.warning('状態を送れません（%s）: %s', stream_id, _reason(e))
+
+
+def _patch_status(client: api.Client, stream_id: str | None, text: str) -> None:
+    """night_status を書く。完了・失敗なら night_done_at も。行が未定なら記録だけ。
+    Write night_status, plus night_done_at on done/failed; only logged while the row is unknown."""
+    log.info('状態: %s', text)
+    if not stream_id:
+        return
+    body: dict = {'night_status': text[:_REASON_MAX]}  # サーバーは 200 文字まで / the server takes up to 200 chars
+    if text.startswith(('完了', '失敗')):
+        body['night_done_at'] = scout.now_iso()
+    _patch_row(client, stream_id, body)
+
+
+def _vod_for_row(row: dict, videos: list[dict]) -> tuple[dict | None, str]:
+    """要求行の VOD と、使えないときの理由 / The requested row's VOD, or the reason it cannot be used."""
+    if row.get('vod_id'):
+        vod = next((v for v in videos if str(v['id']) == str(row['vod_id'])), None)
+    else:
+        vod = night_lib.vod_near(videos, row['started_at'])
+    if vod is None:
+        return None, 'VOD が見つかりません'
+    if vod.get('status') != 'RECORDED':
+        return None, 'VOD はまだ録画中です'
+    return vod, ''
+
+
+def _start_job(ctx: LoopContext, vod: dict, row: dict | None) -> None:
+    """job を作って保存し、行に「処理中: 開始」を書いて run_job を走らせる。scout.run が足したログハンドラは外す。
+    Create and save the job, write '処理中: 開始' on the row, run run_job, then drop log handlers scout.run added."""
+    vod_id = str(vod['id'])
+    ctx.state.job(vod_id)
+    ctx.state.save()  # run_job が落ちても同じ VOD を自動で拾い直さない / never auto-retake the VOD if run_job dies
+
+    def status(text: str) -> None:
+        # 自動着手で行が未定でも、チャットの段が決めた行に後から書く / auto runs write to the row step_chat resolves
+        _patch_status(ctx.client, row['stream_id'] if row else ctx.state.job(vod_id).get('stream_id'), text)
+
+    if row:
+        _patch_row(ctx.client, row['stream_id'], {'night_status': '処理中: 開始', 'night_done_at': None})
+    jctx = JobContext(client=ctx.client, cfg=ctx.cfg, night_cfg=ctx.night_cfg, state=ctx.state, vod=vod,
+                      stream_row=row, footage_root=ctx.footage_root, notify=ctx.notify, status=status,
+                      scout_config_path=ctx.scout_config_path)
+    before = list(scout.log.handlers)
+    try:
+        run_job(jctx)
+    finally:
+        # scout.run は呼ぶたびに scout.log のハンドラを足すので、VOD をまたいで積もらないよう外す
+        # scout.run adds a scout.log handler on every call; drop it so handlers do not pile up across VODs
+        for handler in [h for h in scout.log.handlers if h not in before]:
+            scout.log.removeHandler(handler)
+            handler.close()
+
+
+def _handle_request(ctx: LoopContext, row: dict, snapshot: Callable[[], dict]) -> str | None:
+    """Web の要求 1 行を処理する。済んだ job・止まった job は作り直す（素材名は同じ日フォルダなら引き継ぐ）ので、
+    段がもう一度走り、在るファイルは飛ばす。
+    Handle one web request. A finished or stopped job is recreated (keeping the footage name within the day folder)
+    so the steps run again and skip files that already exist.
+
+    Returns
+    -------
+    str | None
+        走らせた vod_id。VOD が使えなければ None / The vod_id that ran, or None when the VOD cannot be used.
+    """
+    vod, reason = _vod_for_row(row, snapshot()['videos'])
+    if vod is None:
+        _patch_status(ctx.client, row['stream_id'], night_lib.status_text_failed('plan', reason))
+        return None
+    vod_id = str(vod['id'])
+    old = ctx.state.jobs.get(vod_id)
+    if old is not None and (old.get('stopped') or night_lib.next_step(old) is None):
+        reset_job(ctx.state, vod_id, Path(ctx.footage_root) / f'_{night_lib.date_tag_jst(vod["createdAt"])}')
+    _start_job(ctx, vod, row)
+    return vod_id
+
+
+def tick(ctx: LoopContext, now: datetime) -> list[str]:
+    """常駐の 1 周: Web の要求を処理し、poll_minutes ごとに GQL で配信を見張って自動着手する。
+    One daemon tick: handle web requests, then every poll_minutes watch the channel over GQL and auto-start.
+
+    Returns
+    -------
+    list[str]
+        run_job を走らせた vod_id / vod_ids that ran.
+    """
+    channel = ctx.night_cfg['channel']
+    rows = ctx.client.get(f'/api/channels/{scout.seg(channel)}/streams')['streams']
+    requests = night_lib.pending_requests(rows, adopt_running=ctx.adopt_running)
+    ctx.adopt_running = False
+    cached: dict = {}
+
+    def snapshot() -> dict:
+        # 1 周で GQL は 1 回まで / at most one GQL call per tick
+        if 'snap' not in cached:
+            cached['snap'] = gql.snapshot(channel)
+        return cached['snap']
+
+    ran = [vod_id for row in requests if (vod_id := _handle_request(ctx, row, snapshot))]
+    polled = ctx.last_poll is None or now - ctx.last_poll >= timedelta(minutes=float(ctx.night_cfg['poll_minutes']))
+    if polled:
+        snap = snapshot()
+        ctx.last_poll = now
+        if snap['stream']:
+            ctx.state.record_live(snap['stream'])
+            ctx.state.save()
+        vod_id = night_lib.should_start(ctx.state.data, snap, now)
+        if vod_id:
+            vod = next(v for v in snap['videos'] if v['id'] == vod_id)
+            row = next((r for r in rows if str(r.get('vod_id') or '') == str(vod_id)), None)
+            row = row or night_lib.match_stream_row(rows, ctx.state.live_history, vod['createdAt'])
+            log.info('配信終了を検知: VOD %s「%s」', vod_id, vod['title'])
+            _start_job(ctx, vod, row)
+            ran.append(str(vod_id))
+    if requests or polled:
+        log.info('tick: 要求 %d 件・GQL %s・実行 %s', len(requests), '確認' if polled else '省略',
+                 ', '.join(ran) if ran else 'なし')
+    return ran
+
+
+def main_loop(ctx: LoopContext) -> None:
+    """tick を 60 秒ごとに回す。周の中の例外は記録して次の周へ（KeyboardInterrupt は呼び出し側へ）。
+    Run tick every 60 s; an exception inside a tick is logged and the loop goes on (KeyboardInterrupt propagates)."""
+    while True:
+        t0 = time.monotonic()
+        try:
+            tick(ctx, datetime.now(timezone.utc))
+        except Exception:  # 常駐は止めない / the daemon must keep running
+            log.exception('tick で例外（次の周で続けます）')
+        time.sleep(max(0.0, TICK_SEC - (time.monotonic() - t0)))
+
+
+def _pid_alive(pid: int, lock_mtime: float) -> bool:
+    """PID のプロセスが生きていて、lock より前に起動したか（再利用された PID を lock の持ち主と取り違えない）。
+    Whether the PID is alive and started before the lock was written (so a reused PID is not taken for the owner).
+
+    os.kill(pid, 0) は Windows では TerminateProcess になるので使わない。
+    os.kill(pid, 0) is TerminateProcess on Windows, so it is not used.
+    """
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    k32.GetProcessTimes.argtypes = (wintypes.HANDLE, *[ctypes.POINTER(wintypes.FILETIME)] * 4)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: 在るが覗けない / exists but cannot be queried
+    try:
+        code = wintypes.DWORD()
+        if not k32.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:  # STILL_ACTIVE
+            return False
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+            return True
+        created = ((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime) / 1e7 - 11644473600  # FILETIME → epoch
+        return created <= lock_mtime + 1
+    finally:
+        k32.CloseHandle(handle)
+
+
+def acquire_lock(path: Path = LOCK_PATH) -> bool:
+    """lock に自分の PID を書く。生きている別の持ち主がいれば False。古い lock は置き換える。
+    Write our PID into the lock; False when another live owner holds it. A stale lock is replaced."""
+    # ponytail: 確認と書き込みの間の競合は見ない（タスクは IgnoreNew で 1 つしか起動しない）
+    # ponytail: the check-then-write race is ignored (the task starts one instance, IgnoreNew)
+    if path.exists():
+        try:
+            pid = int(path.read_text(encoding='utf-8').strip())
+        except (OSError, ValueError):
+            pid = 0
+        if pid and pid != os.getpid() and _pid_alive(pid, path.stat().st_mtime):
+            return False
+        log.info('古い lock を置き換えます（PID %s）', pid or '不明')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_atomic(path, str(os.getpid()))
+    return True
+
+
+def release_lock(path: Path = LOCK_PATH) -> None:
+    """自分の lock だけ消す / Remove the lock only when it is ours."""
+    try:
+        if path.read_text(encoding='utf-8').strip() == str(os.getpid()):
+            path.unlink()
+    except OSError as e:
+        log.warning('lock を消せません: %s', e)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog='night', description='Peakaboo 夜の処理（単発）/ night runner (one-shot)')
-    p.add_argument('--vod', required=True, help='VOD id')
+    p = argparse.ArgumentParser(prog='night', description='Peakaboo 夜の処理 / night runner')
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--vod', help='VOD id（単発 / one-shot）')
+    mode.add_argument('--daemon', action='store_true', help='常駐 / run as the daemon')
+    mode.add_argument('--tick', action='store_true', help='常駐の 1 周だけ（試験用）/ one daemon tick (testing)')
     p.add_argument('--force', action='store_true', help='job を作り直して全段を実行 / recreate the job and run every step')
     p.add_argument('--footage-root', help='素材の保存先（設定を上書き）/ footage root (overrides the config)')
     p.add_argument('--config', default=str(HERE / 'night.config.json'), help='night.config.json')
     args = p.parse_args(argv)
-    if not args.vod.isdigit():
+    if args.vod is not None and not args.vod.isdigit():
         p.error('--vod は数字 / --vod must be numeric')
     return args
 
@@ -530,6 +756,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # python -I は PYTHONIOENCODING を見ない / -I ignores it
     args = parse_args(argv)
     setup_logging()
+    if args.daemon or args.tick:
+        return main_daemon(args)
     try:
         night_cfg = load_night_config(args.config)
         config_root = night_cfg['footage_root']
@@ -552,6 +780,47 @@ def main(argv: list[str] | None = None) -> int:
         state.save()
     job = run_job(ctx)
     return 0 if night_lib.next_step(job) is None else 1
+
+
+def main_daemon(args: argparse.Namespace) -> int:
+    """--daemon / --tick: 設定とトークンを読み、lock を取って回す。トークンが無ければ尋ねずに終える。
+    --daemon / --tick: load config and token, take the lock and run; never prompt for a missing token."""
+    try:
+        night_cfg = load_night_config(args.config)
+        config_root = night_cfg['footage_root']
+        if args.footage_root:
+            night_cfg['footage_root'] = args.footage_root
+        cfg_path = Path(args.config).resolve().parent / 'scout.config.json'
+        cfg = scout.load_config(cfg_path)
+        token_path = Path(cfg['token_path'])
+        if not token_path.exists():  # 無人で動くので read_token の入力待ちに入らない / unattended: no prompt
+            log.error('トークンがありません: %s（/me で発行して保存してください）', token_path)
+            return 2
+        client = api.Client(cfg['server'], scout.read_token(token_path))
+        state = State(state_path_for(night_cfg['footage_root'], config_root)).load()
+    except (scout.ScoutExit, api.ApiError, ValueError, OSError) as e:
+        log.error('起動できません: %s', _reason(e))
+        return 2
+    if not acquire_lock():
+        log.error('別の常駐が動いているため終了します（%s）', LOCK_PATH)
+        return 3
+    ctx = LoopContext(client=client, cfg=cfg, night_cfg=night_cfg, state=state,
+                      footage_root=Path(night_cfg['footage_root']), notify=notify, scout_config_path=cfg_path)
+    try:
+        if args.tick:
+            try:
+                tick(ctx, datetime.now(timezone.utc))
+            except Exception:
+                log.exception('tick で例外')
+                return 1
+            return 0
+        log.info('常駐を開始: PID %d 素材 %s 状態 %s', os.getpid(), night_cfg['footage_root'], state.path)
+        main_loop(ctx)
+    except KeyboardInterrupt:
+        log.info('常駐を終了します')
+    finally:
+        release_lock()
+    return 0
 
 
 if __name__ == '__main__':

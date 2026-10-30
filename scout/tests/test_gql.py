@@ -68,7 +68,7 @@ class SnapshotTest(unittest.TestCase):
         sent = json.loads(req.data.decode('utf-8'))
         self.assertEqual(sent['variables'], {'login': 'terano_naa'})
         self.assertIn('user(login: $login)', sent['query'])
-        self.assertIn('videos(first: 3, sort: TIME)', sent['query'])
+        self.assertIn('videos(first: 20, sort: TIME)', sent['query'])
         self.assertEqual(urlopen.call_args[1]['timeout'], 20)
 
     def test_network_error(self):

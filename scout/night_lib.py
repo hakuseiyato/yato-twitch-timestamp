@@ -192,15 +192,21 @@ def next_step(job: dict) -> str | None:
     return None
 
 
-def pending_requests(rows: list[dict]) -> list[dict]:
+def pending_requests(rows: list[dict], adopt_running: bool = False) -> list[dict]:
     """「今夜やる」要求が開いていて、まだ処理中でない配信行。
     Stream rows with an open run-tonight request that are not already running.
 
     要求が完了より新しい（完了が無いも含む）ものを開いているとみなす。ミリ秒の有無が混ざるので時刻で比べる。
     A request is open when newer than the last done (or never done); compared as datetimes since milliseconds may differ.
+    adopt_running=True（常駐の起動直後）は、処理中のまま完了時刻の無い行も拾う（前の常駐が途中で落ちた）。
+    adopt_running=True (right after the daemon starts) also takes rows left running with no done time (the previous
+    daemon died mid-run).
     """
     pending = []
     for row in rows:
+        if adopt_running and str(row.get('night_status') or '').startswith('処理中') and not row.get('night_done_at'):
+            pending.append(row)
+            continue
         requested = row.get('night_requested_at')
         done = row.get('night_done_at')
         if not requested or (done and _parse_iso(requested) <= _parse_iso(done)):
@@ -209,6 +215,15 @@ def pending_requests(rows: list[dict]) -> list[dict]:
             continue
         pending.append(row)
     return pending
+
+
+def vod_near(videos: list[dict], started_at: str) -> dict | None:
+    """配信開始に createdAt が最も近く、60 分以内の VOD。無ければ None。
+    The VOD whose createdAt is closest to the stream start and within 60 min; None when there is none."""
+    start = _parse_iso(started_at)
+    near = [(abs(_parse_iso(v['createdAt']) - start), v) for v in videos]
+    near = [item for item in near if item[0] <= _MATCH_WINDOW]
+    return min(near, key=lambda item: item[0])[1] if near else None
 
 
 def status_text_running(step: str, i: int | None = None, n: int | None = None) -> str:

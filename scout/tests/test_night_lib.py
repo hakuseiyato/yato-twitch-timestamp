@@ -93,6 +93,14 @@ class StepsTest(unittest.TestCase):
                 {'stream_id': 'd', 'night_requested_at': '2026-10-30T13:00:00Z', 'night_status': '処理中: 候補'},
                 {'stream_id': 'e'}]
         self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['a', 'c'])
+    def test_pending_adopts_abandoned_running_rows(self):
+        # 常駐が処理中に落ちた行（完了時刻なし）は起動直後だけ拾い直す / rows left running by a dead daemon
+        rows = [{'stream_id': 'd', 'night_requested_at': '2026-10-30T13:00:00Z', 'night_status': '処理中: 候補'},
+                {'stream_id': 'f', 'night_requested_at': '2026-10-30T12:00:00Z', 'night_done_at': '2026-10-30T12:30:00Z',
+                 'night_status': '処理中: 字幕'},
+                {'stream_id': 'g', 'night_status': '処理中: 開始'}]
+        self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows, adopt_running=True)], ['d', 'g'])
+        self.assertEqual(night_lib.pending_requests(rows), [])
     def test_pending_compares_times_not_text(self):
         rows = [{'stream_id': 'm', 'night_requested_at': '2026-10-30T13:00:00.500Z', 'night_done_at': '2026-10-30T13:00:00Z'}]
         self.assertEqual([r['stream_id'] for r in night_lib.pending_requests(rows)], ['m'])

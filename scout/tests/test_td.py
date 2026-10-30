@@ -105,11 +105,23 @@ class ChatDownloadTest(unittest.TestCase):
                 td.chatdownload(EXE, '123 --x', Path(r'C:\tmp\chat.json'))
         run.assert_not_called()
 
-    def test_failure_propagates(self):
-        err = subprocess.CalledProcessError(1, ['x'])
+    def test_failure_propagates_with_output_tail(self):
+        # night.log に CLI の失敗理由を残すため、出力の末尾を例外に載せる / the output tail rides on the exception
+        err = subprocess.CalledProcessError(1, ['x'], output='', stderr='x' * 600 + 'Unable to find VOD')
         with mock.patch('td.subprocess.run', side_effect=err):
-            with self.assertRaises(subprocess.CalledProcessError):
+            with self.assertRaises(subprocess.CalledProcessError) as cm:
                 td.chatdownload(EXE, '2914625472', Path(r'C:\tmp\chat.json'))
+        self.assertEqual(cm.exception.returncode, 1)
+        self.assertIn('Unable to find VOD', str(cm.exception))
+        self.assertLessEqual(len(cm.exception.stderr), 500)
+
+    def test_output_is_captured_without_window(self):
+        with mock.patch('td.subprocess.run') as run:
+            td.chatdownload(EXE, '2914625472', Path(r'C:\tmp\chat.json'))
+        kwargs = run.call_args.kwargs
+        self.assertTrue(kwargs.get('capture_output'))
+        self.assertTrue(kwargs.get('text'))
+        self.assertEqual(kwargs.get('creationflags'), getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
 class ChatRenderTest(unittest.TestCase):

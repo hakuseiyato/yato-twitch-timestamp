@@ -42,6 +42,33 @@ from pathlib import Path
 
 # 透過を保つ QuickTime Animation。上の試験を参照 / QuickTime Animation keeps alpha; see the trials above
 ALPHA_OUTPUT_ARGS = '-c:v qtrle -pix_fmt argb "{save_path}"'
+_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+_TAIL_CHARS = 500
+
+
+class CliError(subprocess.CalledProcessError):
+    """CLI の失敗。文字列に出力の末尾を含める（常駐の night.log に理由を残すため）。
+    A CLI failure whose text includes the output tail, so the daemon's night.log shows why."""
+
+    def __str__(self) -> str:
+        return f'{super().__str__()} 出力の末尾 / output tail: {self.stderr}'
+
+
+def _run_cli(argv: list[str]) -> None:
+    """CLI を窓なしで動かし、出力を捕まえる。失敗は末尾 500 文字付きの CliError。
+    Run the CLI without a console window, capturing output; a failure raises CliError with the last 500 chars.
+
+    Raises
+    ------
+    CliError
+        終了コードが 0 でない / Non-zero exit code.
+    """
+    try:
+        subprocess.run(argv, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace',
+                       creationflags=_NO_WINDOW)
+    except subprocess.CalledProcessError as e:
+        tail = ((e.stderr or '') + (e.output or '')).strip()[-_TAIL_CHARS:]
+        raise CliError(e.returncode, e.cmd, output='', stderr=tail) from None
 
 
 def ensure_installed(exe: Path) -> None:
@@ -79,13 +106,12 @@ def chatdownload(exe: Path, vod_id: str, out_json: Path) -> None:
     ------
     ValueError
         vod_id が数字でない / vod_id is not numeric.
-    subprocess.CalledProcessError
-        CLI が失敗した / The CLI failed.
+    CliError
+        CLI が失敗した（subprocess.CalledProcessError の子）/ The CLI failed (a CalledProcessError).
     """
     if not str(vod_id).isdigit():
         raise ValueError(f'VOD id が不正です / Invalid VOD id: {vod_id!r}')
-    subprocess.run([str(exe), 'chatdownload', '-u', str(vod_id), '-o', str(out_json), '-E',
-                    '--collision', 'Exit'], check=True)
+    _run_cli([str(exe), 'chatdownload', '-u', str(vod_id), '-o', str(out_json), '-E', '--collision', 'Exit'])
 
 
 def simplify_chat(td_json: dict) -> list[list]:
@@ -171,12 +197,12 @@ def chatrender(exe: Path, chat_json: Path, begin: float, end: float, out_mov: Pa
 
     Raises
     ------
-    subprocess.CalledProcessError
-        CLI が失敗した / The CLI failed.
+    CliError
+        CLI が失敗した（subprocess.CalledProcessError の子）/ The CLI failed (a CalledProcessError).
     """
-    subprocess.run([str(exe), 'chatrender', '-i', str(chat_json), '-o', str(out_mov),
-                    '-b', f'{round(begin * 1000)}ms', '-e', f'{round(end * 1000)}ms',
-                    '-w', str(render_cfg['width']), '-h', str(render_cfg['height']),
-                    '--font-size', str(render_cfg['font_size']),
-                    '--background-color', str(render_cfg['background']),
-                    '--offline', f'--output-args={ALPHA_OUTPUT_ARGS}', '--collision', 'Exit'], check=True)
+    _run_cli([str(exe), 'chatrender', '-i', str(chat_json), '-o', str(out_mov),
+              '-b', f'{round(begin * 1000)}ms', '-e', f'{round(end * 1000)}ms',
+              '-w', str(render_cfg['width']), '-h', str(render_cfg['height']),
+              '--font-size', str(render_cfg['font_size']),
+              '--background-color', str(render_cfg['background']),
+              '--offline', f'--output-args={ALPHA_OUTPUT_ARGS}', '--collision', 'Exit'])
