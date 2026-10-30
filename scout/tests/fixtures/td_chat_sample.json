@@ -1,0 +1,33 @@
+{
+  "FileInfo": {"Version": {"Major": 1, "Minor": 4, "Patch": 0}, "CreatedAt": "2026-10-30T12:00:00Z", "UpdatedAt": "0001-01-01T00:00:00"},
+  "streamer": {"name": "テスト配信者", "login": "test_streamer", "id": 1000},
+  "clipper": null,
+  "video": {"title": "テスト配信", "description": null, "id": "1000000001", "created_at": "2026-10-30T06:00:00Z", "start": 0, "end": 120, "length": 120, "viewCount": 1, "game": "Just Chatting", "chapters": []},
+  "comments": [
+    {
+      "_id": "c-0001", "created_at": "2026-10-30T06:00:12Z", "channel_id": "1000", "content_type": "video", "content_id": "1000000001",
+      "content_offset_seconds": 12.5,
+      "commenter": {"display_name": "視聴者A", "_id": "2001", "name": "viewer_a", "bio": null, "created_at": "2020-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "logo": null},
+      "message": {"body": "こんばんは", "bits_spent": 0, "fragments": [{"text": "こんばんは", "emoticon": null}], "user_badges": [], "user_color": "#1E90FF", "emoticons": []}
+    },
+    {
+      "_id": "c-0002", "created_at": "2026-10-30T06:00:30Z", "channel_id": "1000", "content_type": "video", "content_id": "1000000001",
+      "content_offset_seconds": 30,
+      "commenter": null,
+      "message": {"body": "名前のない人のコメント", "bits_spent": 0, "fragments": [{"text": "名前のない人のコメント", "emoticon": null}], "user_badges": [], "user_color": null, "emoticons": []}
+    },
+    {
+      "_id": "c-0003", "created_at": "2026-10-30T05:59:58Z", "channel_id": "1000", "content_type": "video", "content_id": "1000000001",
+      "content_offset_seconds": -2,
+      "commenter": {"display_name": "viewer_b", "_id": "2002", "name": "viewer_b", "bio": null, "created_at": "2021-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "logo": null},
+      "message": {"body": "始まる前の一言", "bits_spent": 0, "fragments": [{"text": "始まる前の一言", "emoticon": null}], "user_badges": [], "user_color": null, "emoticons": []}
+    },
+    {
+      "_id": "c-0004", "created_at": "2026-10-30T06:01:00Z", "channel_id": "1000", "content_type": "video", "content_id": "1000000001",
+      "content_offset_seconds": 60,
+      "commenter": {"display_name": "視聴者C", "_id": "2003", "name": "viewer_c", "bio": null, "created_at": "2022-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "logo": null},
+      "message": {"bits_spent": 0, "fragments": [], "user_badges": [], "user_color": null, "emoticons": []}
+    }
+  ],
+  "embeddedData": null
+}
