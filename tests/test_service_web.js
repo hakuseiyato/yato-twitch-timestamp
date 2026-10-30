@@ -199,3 +199,23 @@ const fakePages = [
   await assert.rejects(Chat.fetchVodChat('1', null, {}), /^Error: 次ページの位置がありません$/);
   console.log('all tests passed');
 }()).catch(function (e) { console.error(e); process.exit(1); });
+
+// 夜の処理の状態行 / Night run status line
+const Night = require('../service/web/js/night.js');
+const T0 = Date.parse('2026-10-30T13:00:00Z');
+assert.deepStrictEqual(Night.nightStatusText({}, T0), { text: '', kind: 'idle', running: false });
+assert.deepStrictEqual(Night.nightStatusText({ night_requested_at: '2026-10-30T12:59:00Z' }, T0),
+  { text: '要求済み', kind: 'requested', running: true });
+assert.strictEqual(Night.nightStatusText({ night_requested_at: '2026-10-30T12:54:00Z' }, T0).kind, 'stale');
+assert.strictEqual(Night.nightStatusText({ night_requested_at: '2026-10-30T12:54:00Z' }, T0).text, 'PC 側の常駐が動いていないようです');
+assert.deepStrictEqual(Night.nightStatusText({ night_requested_at: '2026-10-30T12:54:00Z', night_status: '処理中: チャット動画 3/10' }, T0),
+  { text: '処理中: チャット動画 3/10', kind: 'running', running: true });
+const done = { night_requested_at: '2026-10-30T12:00:00Z', night_done_at: '2026-10-30T12:40:00Z', night_status: '完了（候補 10・チャット動画 10・字幕 10）' };
+assert.strictEqual(Night.nightStatusText(done, T0).running, false);
+assert.strictEqual(Night.nightStatusText(done, T0).kind, 'done');
+assert.ok(Night.nightStatusText(done, T0).text.indexOf('完了（候補 10') === 0);
+assert.strictEqual(Night.nightStatusText(Object.assign({}, done, { night_status: '失敗: チャット動画 — exit 1' }), T0).kind, 'failed');
+// 済んだあとに再度押された → 要求済みに戻る / Pressed again after completion -> back to requested
+assert.strictEqual(Night.nightStatusText(Object.assign({}, done, { night_requested_at: '2026-10-30T12:59:30Z' }), T0).kind, 'requested');
+// 自動検知の実行（要求なし）も処理中として出る / An auto-detected run (no request) also shows as running
+assert.strictEqual(Night.nightStatusText({ night_status: '処理中: VOD 保存' }, T0).running, true);

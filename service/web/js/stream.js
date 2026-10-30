@@ -9,6 +9,10 @@
   const BIN_CHOICES = [15, 30, 60, 120];
   const OFFSET_LIMIT_SEC = 3600;
   const SETTING_LABELS = { vod_offset_sec: 'VOD のずれ', chat_lag_sec: '反応の遅れ' };
+  // 夜の処理: 処理中だけ状態を読み直す間隔と、状態の種類 → 文字の class / Night run: re-read interval while running, and status kind -> text class
+  const NIGHT_POLL_MS = 10000;
+  const NIGHT_CLASS = { done: 'ok', requested: 'warn', stale: 'warn', failed: 'err' };
+  const NIGHT_KEYS = ['night_requested_at', 'night_done_at', 'night_status'];
   // この幅以上はコメントとスタンプを横並び（app.css の .lists / .tabs と同じ値）
   // At this width and up, comments and stamps sit side by side (same value as .lists / .tabs in app.css)
   const wideQuery = window.matchMedia('(min-width: 1100px)');
@@ -33,6 +37,8 @@
   let graph = null;
   let vodCandidates = [];
   let importAbort = null;
+  let nightTimer = null;     // 処理中の polling の setInterval / setInterval of the polling while running
+  let nightPolling = false;  // 読み直しの GET が飛んでいる / A re-read GET is in flight
   const deleting = new Set(); // 削除を送っている最中のスタンプ id / Ids of stamps whose deletion is in flight
 
   // ---- 共通 / Shared ----
@@ -110,6 +116,53 @@
     const candidates = stamps.filter(function (s) { return TSLib.isCandidate(s.memo); }).length;
     $('stamp-meta').replaceChildren('スタンプ ', el('b', { class: 'num', text: stamps.length.toLocaleString() }));
     if (candidates > 0) $('stamp-meta').append(' ', el('span', { class: 'faint', text: '候補 ' + candidates.toLocaleString() }));
+    renderNight();
+  }
+
+  // ---- 夜の処理 / Night run ----
+
+  // 状態行・ボタン・polling を今の stream に合わせる（処理中はボタンを止め、10 秒ごとに読み直す）
+  // Syncs the status line, button and polling to the current stream (button off and a re-read every 10 s while running)
+  function renderNight() {
+    const night = YTSNight.nightStatusText(stream, Date.now());
+    const state = $('night-state-text');
+    state.textContent = night.text;
+    state.className = NIGHT_CLASS[night.kind] || '';
+    $('night-button').disabled = night.running;
+    if (night.running && nightTimer === null) {
+      nightTimer = setInterval(pollNight, NIGHT_POLL_MS);
+    } else if (!night.running && nightTimer !== null) {
+      clearInterval(nightTimer);
+      nightTimer = null;
+    }
+  }
+
+  // 夜の処理の 3 列だけ取り直す（ほかの列は画面の入力・時刻補正と揃えたままにする）
+  // Re-reads only the three night columns (other columns stay in step with the inputs and time correction on screen)
+  async function pollNight() {
+    if (nightPolling) return;
+    nightPolling = true;
+    try {
+      const fresh = (await api(base)).stream;
+      for (const key of NIGHT_KEYS) stream[key] = fresh[key];
+    } catch (e) {
+      // 一時的な失敗は次の回に任せる / A transient failure is left to the next tick
+    } finally {
+      nightPolling = false;
+    }
+    renderNight();
+  }
+
+  // 「いま実行」: 要求の時刻を PATCH し、常駐が拾うのを待つ / "Run now": PATCHes the request time and waits for the daemon to pick it up
+  async function runTonight() {
+    showError('');
+    $('night-button').disabled = true;
+    try {
+      stream = (await api(base, { method: 'PATCH', body: { night_requested_at: new Date().toISOString() } })).stream;
+    } catch (e) {
+      showError('夜の処理を要求できませんでした: ' + errorText(e));
+    }
+    renderNight();
   }
 
   // ---- コメント一覧（1 度だけ組み、強調とスクロールでは組み直さない）/ Comment list (built once; highlight and scroll never rebuild it) ----
@@ -659,6 +712,8 @@
     $('vod-cancel').addEventListener('click', function () { showError(''); closePicker(); });
     $('import-cancel').addEventListener('click', function () { if (importAbort) importAbort.abort(); });
     $('popout-button').addEventListener('click', popOut);
+    // 読み込み時に処理中なら polling は renderHead → renderNight で始まっている / If running at load, polling already started via renderHead -> renderNight
+    $('night-button').addEventListener('click', runTonight);
     syncLayout();
     wideQuery.addEventListener('change', syncLayout);
   }
