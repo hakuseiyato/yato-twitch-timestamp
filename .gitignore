@@ -9,3 +9,4 @@ service/.wrangler/
 # superpowers の作業領域 / superpowers scratch
 .worktrees/
 .superpowers/
+__pycache__/
