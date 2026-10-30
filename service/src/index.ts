@@ -3,6 +3,7 @@
 import TSLib from '../../panel/js/lib.js';
 import { registerAuthRoutes, TwitchUnavailable } from './auth';
 import { registerChatRoutes } from './chat';
+import { corsPreflight, withCors } from './cors';
 import { error, json } from './http';
 import { registerMemberRoutes } from './members';
 import { Router } from './router';
@@ -45,7 +46,13 @@ export default {
     // サインインの戻り先は静的ページ（auth/callback.html）。他の /auth/ は router
     // The sign-in return page is static (auth/callback.html); other /auth/ paths go to the router
     if (path === '/auth/callback') return env.ASSETS.fetch(request);
-    if (path.startsWith('/api/') || path.startsWith('/auth/')) return handleRoute(request, env, url);
+    if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+      // /api/ の preflight は認証より前に答える。応答はエラーも含めて Bearer のときだけ CORS を付ける
+      // Answer /api/ preflights before auth. Every response, errors included, gets CORS only for Bearer requests
+      const preflight = corsPreflight(request);
+      if (preflight) return preflight;
+      return withCors(request, await handleRoute(request, env, url));
+    }
     // 共有ページ /s/<id> と /s/<id>/comments。拡張子なしで引く（.html だと 307 で /s へ飛ばされ ID が消える）
     // Shared pages /s/<id> and /s/<id>/comments. Fetch without the extension (.html would 307 to /s and drop the id)
     if (/^\/s\/[^/]+\/?$/.test(path)) return env.ASSETS.fetch(new Request(url.origin + '/s', request));
