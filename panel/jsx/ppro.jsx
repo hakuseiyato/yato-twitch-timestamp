@@ -845,13 +845,15 @@ function ytsCreateShorts(p) {
     } catch (e) {
         result = "ERR|" + created + " 件作成後に失敗: " + e.toString();
     } finally {
-        // In/Out を一度でも動かし、かつ元の In と Out の両方が読めたときだけ戻す。In を 2 回置くのは、途中の In/Out と前後が入れ替わって弾かれるのを避けるため
-        // Restore only when this run moved In/Out and both originals were read. In is set twice so a reversed intermediate order cannot reject it.
-        if (touched && isFinite(origIn) && origIn >= 0 && isFinite(origOut) && origOut > 0) {
+        // In/Out を一度でも動かしたときだけ元へ戻す。未設定は -400000 と読めるので、数値の -400000 を置き直すと未設定に戻る
+        // （PPro 26.5 実機で確認、2026-10-30）。out → in → out の順は、途中で In と Out の前後が入れ替わって弾かれるのを避けるため
+        // Restore only when this run moved In/Out. "Unset" reads as -400000, and writing the number -400000 back clears it
+        // (verified on PPro 26.5, 2026-10-30). The out → in → out order avoids a rejected reversed intermediate state.
+        if (touched && isFinite(origIn) && isFinite(origOut)) {
             try {
-                seq.setInPoint(toTime(origIn));
-                seq.setOutPoint(toTime(origOut));
-                seq.setInPoint(toTime(origIn));
+                if (origOut < 0) seq.setOutPoint(-400000); else seq.setOutPoint(toTime(origOut));
+                if (origIn < 0) seq.setInPoint(-400000); else seq.setInPoint(toTime(origIn));
+                if (origOut < 0) seq.setOutPoint(-400000); else seq.setOutPoint(toTime(origOut));
             } catch (restoreFailure) { restoreError = restoreFailure; }
         }
         // createSubsequence が新しい Sequence を開く場合に備えて元へ戻す / Switch back in case createSubsequence opened the new sequence.
