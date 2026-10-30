@@ -798,6 +798,7 @@ function ytsCreateShorts(p) {
     var origId;
     var existing;
     var id;
+    var child;
     // Premiere 26 で確実に効くのは ticks で作った Time / A Time built from ticks is the form known to work in Premiere 26.
     var toTime = function (sec) {
         var t = new Time();
@@ -855,7 +856,16 @@ function ytsCreateShorts(p) {
         parentBin = parentBinName ? ytsFindBin(app.project.rootItem, parentBinName) : null;
         if (!parentBin) { parentBin = app.project.rootItem; binPath = binName; }
         bin = ytsFindBin(parentBin, binName);
-        if (bin) existing = bin.children.numItems;
+        // 日付 bin にはフル尺 Sequence や captions bin も入るので、Short の Sequence だけを数える（日付ありは名前に _Short_、既定 bin は Short_ で始まる）
+        // The day bin also holds the full-length sequence and the captions bin, so only Short sequences are counted (_Short_ in the name with a date, Short_ prefix in the default bin).
+        if (bin) {
+            for (j = 0; j < bin.children.numItems; j += 1) {
+                child = bin.children[j];
+                try {
+                    if (child && child.isSequence() && (dateTag ? String(child.name).indexOf("_Short_") >= 0 : String(child.name).indexOf("Short_") === 0)) existing += 1;
+                } catch (childError) {}
+            }
+        }
         if (p.dryRun) return "OK|" + ytsJson({ existing: existing, bin: binPath, targets: targets.length, sequenceNames: sequenceNames });
 
         for (i = 0; i < targets.length; i += 1) {
@@ -946,9 +956,11 @@ function ytsFindSequence(sequenceId, name) {
 function ytsFindItemByMediaPath(path) {
     var native = new File(path).fsName;
     var want = native.toLowerCase();
-    var items = app.project.rootItem.findItemsMatchingMediaPath(native, 1);
+    var items;
     var count;
     var i;
+    // API が無い・失敗する版では null（呼び出し側が bin 直下を探す）/ null when the API is missing or fails (callers also scan the bin)
+    try { items = app.project.rootItem.findItemsMatchingMediaPath(native, 1); } catch (findError) { return null; }
     if (!items) return null;
     count = Number(items.length || items.numItems || 0);
     for (i = 0; i < count; i += 1) {
@@ -959,15 +971,32 @@ function ytsFindItemByMediaPath(path) {
     return null;
 }
 
+// bin 直下で素材パスが同じ項目（無ければ null）。findItemsMatchingMediaPath が入れ子の bin を探さない場合の備え
+// The direct child of bin with the same media path (null when none); a fallback in case findItemsMatchingMediaPath does not search nested bins.
+function ytsFindChildByMediaPath(bin, path) {
+    var want = new File(path).fsName.toLowerCase();
+    var i;
+    var child;
+    if (!bin || !bin.children) return null;
+    for (i = 0; i < bin.children.numItems; i += 1) {
+        child = bin.children[i];
+        try {
+            if (child && child.type !== ProjectItemType.BIN && String(child.getMediaPath() || "") &&
+                    new File(String(child.getMediaPath())).fsName.toLowerCase() === want) return child;
+        } catch (pathError) {}
+    }
+    return null;
+}
+
 // 同じ素材が既にあれば再利用し、無ければ bin へ読み込む（二重に読み込まない）
 // Reuses an item with the same media, else imports it into bin (never imports twice).
 function ytsImportOnce(path, bin) {
-    var item = ytsFindItemByMediaPath(path);
+    var item = ytsFindItemByMediaPath(path) || ytsFindChildByMediaPath(bin, path);
     if (item) return item;
     if (!bin) throw new Error("読み込み先の bin を作れませんでした");
     // importFiles(パス配列, 警告を出さない, 読み込み先 bin, 連番静止画として読まない) / (paths, suppressUI, targetBin, importAsNumberedStills)
     app.project.importFiles([new File(path).fsName], true, bin, false);
-    item = ytsFindItemByMediaPath(path);
+    item = ytsFindChildByMediaPath(bin, path) || ytsFindItemByMediaPath(path);
     if (!item) throw new Error("読み込めませんでした: " + path);
     return item;
 }
@@ -983,6 +1012,8 @@ function ytsImportStream(p) {
     var item;
     var seq;
     var existing;
+    var footageBin;
+    var seqBin;
     try {
         p = p || {};
         footage = String(p.footage || "");
@@ -991,12 +1022,15 @@ function ytsImportStream(p) {
         if (!/^[0-9]{6}$/.test(dateTag)) return "ERR|日付（YYMMDD）が不正です";
         if (!sequenceName) return "ERR|Sequence 名がありません";
         if (!footage || !new File(footage).exists) return "ERR|素材が見つかりません: " + footage;
-        item = ytsImportOnce(footage, ytsFindBinPath(app.project.rootItem, ["Footage", "_" + dateTag], true));
+        footageBin = ytsFindBinPath(app.project.rootItem, ["Footage", "_" + dateTag], true);
+        if (!footageBin) return "ERR|Footage/_" + dateTag + " の bin を作れませんでした";
+        item = ytsImportOnce(footage, footageBin);
         seq = ytsFindSequence("", sequenceName);
         existing = !!seq;
         if (!seq) {
-            seq = app.project.createNewSequenceFromClips(sequenceName, [item],
-                ytsFindBinPath(app.project.rootItem, ["Sequence", "_" + dateTag], true));
+            seqBin = ytsFindBinPath(app.project.rootItem, ["Sequence", "_" + dateTag], true);
+            if (!seqBin) return "ERR|Sequence/_" + dateTag + " の bin を作れませんでした";
+            seq = app.project.createNewSequenceFromClips(sequenceName, [item], seqBin);
             if (!seq || typeof seq !== "object") return "ERR|Sequence を作れませんでした";
         }
         // 続くマーカー同期と Short 作成はアクティブな Sequence に対して動くので、既存でも開く
@@ -1056,9 +1090,9 @@ function ytsPlaceChat(p) {
                 }
             }
             if (!result) {
-                // Track.insertClip(項目, ticks の文字列)。チャット動画は映像だけなので音声トラックは触らない
-                // Track.insertClip(item, time in ticks as a string). The chat video has no audio, so no audio track is touched.
-                track.insertClip(item, "0");
+                // Track.overwriteClip(項目, ticks の文字列)。insert は同期ロックで V1 / A1 を後ろへずらし得るので上書きで置く。チャット動画は映像だけ
+                // Track.overwriteClip(item, time in ticks as a string). Insert could ripple V1 / A1 through sync lock, so overwrite is used. The chat video has no audio.
+                track.overwriteClip(item, "0");
                 result = "OK|" + ytsJson({ placed: true });
             }
         }
@@ -1089,6 +1123,11 @@ function ytsPlaceCaption(p) {
         seq = ytsFindSequence(p.sequenceId, "");
         if (!seq) return "ERR|Short が見つかりません";
         item = ytsImportOnce(srtPath, ytsFindBinPath(app.project.rootItem, ["Sequence", "_" + dateTag, "captions"], true));
+        // 既にキャプショントラックがあれば重ねて作らない（captionTracks が無い版もあるので try で読む）
+        // Do not add a second caption track (captionTracks may not exist in every version, hence the try).
+        try {
+            if (seq.captionTracks && Number(seq.captionTracks.numTracks) > 0) return "OK|" + ytsJson({ placed: false, skipped: "already" });
+        } catch (captionTracksError) {}
         if (typeof seq.createCaptionTrack === "function") {
             try { placed = seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE) === true; } catch (captionError) { placed = false; }
         }
