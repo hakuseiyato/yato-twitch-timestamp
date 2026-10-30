@@ -125,6 +125,22 @@ Cloudflare ダッシュボードで次を見る（数値は設計書 §3、2026-
 - Web 版の Client-ID `kimne78kx3ncx6brgo4mv6wki5h1ko` は、cursor 送りの 2 ページ目以降が `IntegrityCheckFailed` になるので使わない（2026-10-29 実測）
 - 取得は最後のページまで取り終えてから 1 回だけ PUT する。途中で失敗しても、R2 にある前回の取り込みは上書きされない
 
+### migration を足したときの deploy（0002 夜の処理）
+
+`migrations/0002_night.sql` は `streams` に `night_requested_at` / `night_done_at` / `night_status` の 3 列を足す（Night Runner 用。README の「Night Runner」節）。
+この 3 列を読み書きするコード（`PATCH /api/streams/:id` の `night_*`、配信ページの「夜の処理 … いま実行」）より先に、本番 D1 へ migration を流す。
+Cloudflare の OAuth を更新できるのは Yato さんのターミナルだけなので、Claude のシェルからは実行しない。`service/` で:
+
+```sh
+npm run migrate:remote   # wrangler d1 migrations apply yts --remote（0002 だけが適用される）
+npm run deploy           # wrangler deploy
+```
+
+- 順番を逆にすると、deploy 後から migration までの間、`night_*` を含む PATCH が D1 の「列が無い」エラーで 500 になる（常駐の状態更新と「いま実行」が失敗する）
+- migration だけ先に流した状態は無害（古いコードは新しい列を読まない）
+- 確認: `npx wrangler d1 execute yts --remote --command "SELECT night_requested_at, night_done_at, night_status FROM streams LIMIT 1"` がエラーにならないこと
+- 以後も migration を足したら同じ順（`migrate:remote` → `deploy`）
+
 ### ログと D1 の確認
 
 ```sh
@@ -166,7 +182,7 @@ cookie で認証した変更系（POST / PUT / PATCH / DELETE）は `X-Requested
 | GET | `/api/channels/:login/streams` | 会員 | 配信一覧（新しい順、墓標を除くスタンプ数付き） |
 | POST | `/api/streams` | 会員 | VOD から配信を登録。既存なら `vod_id` と空でない `title` だけ更新 |
 | GET | `/api/streams/:id` | 会員 | 配信 1 件 |
-| PATCH | `/api/streams/:id` | 会員 | `vod_id` / `vod_offset_sec` / `chat_lag_sec` / `title` を更新 |
+| PATCH | `/api/streams/:id` | 会員 | `vod_id` / `vod_offset_sec` / `chat_lag_sec` / `title` / `night_requested_at` / `night_done_at` / `night_status` を更新（`night_*` は null で消す。日時は 40 文字以内の ISO、状態は 200 文字まで） |
 | POST | `/api/stamps` | 認証済み（行ごとに会員を確認） | スタンプの upsert（1 要求 500 件まで）。`updated_at` が新しい方が勝つ。墓標は作者本人か owner だけ |
 | GET | `/api/streams/:id/stamps` | 会員 | 墓標込みの全件（`offset_sec` 昇順）。`?since=` で差分 |
 | PUT | `/api/streams/:id/chat` | 会員 | チャット JSON を R2 へ（`?vod_id=&count=&length_sec=`、50 MB まで、本文はパースしない） |
@@ -183,13 +199,13 @@ cookie で認証した変更系（POST / PUT / PATCH / DELETE）は `X-Requested
 - キー: `chat/<channel>/<vod_id>.json`。同じ VOD を取り込み直すと上書き
 - 形: `{"vod_id":"…","length_sec":…,"fetched_at":"…","client":"web/1.0","comments":[[offset_sec, login, display_name, text], …]}`（エモート・色・バッジは持たない）
 
-### D1（データベース `yts`、binding `DB`、スキーマは `migrations/0001_init.sql`）
+### D1（データベース `yts`、binding `DB`、スキーマは `migrations/0001_init.sql` と `0002_night.sql`）
 
 | 表 | 主キー | 中身 |
 |---|---|---|
 | `channels` | `login` | 配信チャンネル |
 | `members` | `(channel, login)` | 会員と役割（`owner` / `editor`） |
-| `streams` | `stream_id` | 配信。`vod_id`、`vod_offset_sec`（既定 0）、`chat_lag_sec`（既定 5）、チャットの R2 キーと件数 |
+| `streams` | `stream_id` | 配信。`vod_id`、`vod_offset_sec`（既定 0）、`chat_lag_sec`（既定 5）、チャットの R2 キーと件数、夜の処理の `night_requested_at` / `night_done_at` / `night_status` |
 | `stamps` | `(stream_id, id)` | スタンプ。同期 CSV の列に `source`（`extension` / `web` / `panel` / `scout`）を足したもの。Scout の候補は `memo` が `候補:` で始まり `source` が `scout` の行（スキーマは同じ）。削除は `deleted=1` の墓標 |
 | `api_tokens` | `hash` | `ytt_` トークンの SHA-256 |
 | `sessions` | `id` | session cookie（30 日） |

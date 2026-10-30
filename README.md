@@ -122,6 +122,8 @@ Options (pass them after `scout.bat` from a terminal, or run `python -I scout.py
 | `--top N` | Candidate cap, overriding `cap_total` |
 | `--replace` | Delete (tombstone) your own previous candidates for the stream and pick again; the tombstones go in the same POST after the `y` confirmation |
 | `--cpu` | Run Whisper on the CPU |
+| `--yes` | Send without the "送信しますか？" confirmation (used by the Night Runner) |
+| `--source <mp4>` | Take the audio from this local VOD file instead of downloading the audio-only stream (used by the Night Runner) |
 | `--config <path>` | Another config file instead of `scout/scout.config.json` |
 
 Exit codes: `0` sent (or `--dry-run`), `1` no candidates or not sent, `2` error. The log is appended to `<cache_dir>\<vod_id>\scout.log` (`cache_dir` is `%LOCALAPPDATA%\peakaboo\scout` by default), next to the cached audio and `transcript.json`.
@@ -147,6 +149,107 @@ Tuning:
 Edit `scout/scout.config.json`: `weights` (per signal), `threshold`, `keyword_words` (transcript keywords), `laugh_words`, `chat_words`, `exclude_radius_sec`, `merge_sec`, and `cap_total`. Because the transcript is cached, a re-run with `--dry-run` re-scores in seconds; compare the table with what you would have picked and adjust. Use `--replace` to swap your previous candidates for the new ones.
 
 Privacy: the audio and the transcript stay on your machine in `cache_dir`. Only the candidate stamps (the 13 stamp columns: time, memo, your login, and so on) are sent to the server.
+
+## Night Runner（配信終了後の自動化） / Night Runner (after-stream automation)
+
+The Night Runner (`scout/night.py`) is a resident process on the editing PC. After a stream ends it downloads the VOD, imports the chat, runs Scout, renders a transparent chat video and writes captions for every stamp, and leaves a plan file next to the footage. In the morning the Premiere Pro panel's "配信を取り込む" (import stream) button reads that plan and lays out the footage, the markers, the Short sequences, the chat videos, and the captions. The Night Runner only adds: it never deletes stamps and never overwrites a file that already exists.
+
+Prerequisites:
+
+- Everything Scout needs (see [Scout](#scout候補検知--scout-highlight-candidates)): Python 3.13 with its packages, `ffmpeg`, `yt-dlp`, the GPU, and `scout/scout.config.json` (`server`, `channel`, `cache_dir`, and `token_path` are shared).
+- TwitchDownloaderCLI. The editing PC has 1.56.5 at `D:\Tools\TwitchDownloader\TwitchDownloaderCLI.exe`; another location goes in `twitch_downloader`.
+- The service with migration `0002_night.sql` applied (see [`service/README.md`](service/README.md)). Before it is applied, the "いま実行" request is silently dropped and the daemon's status updates fail with 500.
+- Disk space under the footage root: one stream is about 3 GB of VOD plus 30–45 MB per chat video.
+
+Setup:
+
+1. Check `scout/night.config.json`. `footage_root` (default `D:\Work_HDD\寺乃なあ\Footage`) and `twitch_downloader` accept `%VAR%`. The other keys are `channel`, `pre_sec` / `post_sec` (15 / 45: the window around each stamp), `chat_render` (`width` 400, `height` 1080, `font_size` 24, `background` `#00000000`), `caption_line_chars` (20), and `poll_minutes` (10).
+2. Put the panel token at `%APPDATA%\peakaboo\scout.token`, that is `C:\Users\<you>\AppData\Roaming\peakaboo\scout.token`. Running `scout\scout.bat` once asks for it and saves it there. **Do it from a normal terminal or Explorer.** The shell inside the Claude desktop app virtualizes `%APPDATA%` and `%LOCALAPPDATA%` (its writes land under `AppData\Local\Packages\Claude_…\LocalCache`), so a token saved from there is invisible to the scheduled task. The daemon never prompts: without the token it logs "トークンがありません: …" and exits with code 2.
+3. Register the logon task from the checkout that should run:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scout\install_night_task.ps1
+   Start-ScheduledTask 'Peakaboo Night'   # start now instead of at the next logon
+   ```
+
+   The task is named `Peakaboo Night`, starts at logon of the current user, and runs `pythonw.exe -I "<checkout>\scout\night.py" --daemon` (no console window). It is restarted up to three times a minute apart if it dies, and it has no time limit. Re-running the installer replaces the task. The action points at the checkout the installer was run from, so **re-run it after merging or moving the repository** (otherwise the task keeps running the old copy, or fails when that copy is gone).
+4. To remove the task: `powershell -ExecutionPolicy Bypass -File scout\install_night_task.ps1 -Uninstall`. Stop a running daemon first with `Stop-ScheduledTask 'Peakaboo Night'`.
+
+What runs at night:
+
+- Every 60 seconds the daemon reads the channel's stream rows for web requests (below). Every `poll_minutes` (10) it asks Twitch GraphQL for the live state and the newest 20 VODs. Once the channel has been seen live within the last 24 hours, is offline again, and a VOD created at most 6 hours before the last live sighting is `RECORDED`, it starts a job for the newest such VOD that has no job yet.
+- A job runs these steps in order, skipping the ones already done:
+
+| Step | Status label | What it does |
+|---|---|---|
+| `vod` | VOD 保存 | Downloads the full VOD with `yt-dlp` to `<footage_root>\_YYMMDD\YYMMDD_<title>.mp4` (YYMMDD = the VOD's start day in JST, title cut to 30 characters with Windows-forbidden characters removed). If a file of that name is already there (your own recording), the download is saved as `…_vod.mp4` instead; name clashes between VODs of the same day get `_2`, `_3`. The name is chosen once and kept on re-runs. |
+| `chat` | チャット | Finds or registers the stream row (`POST /api/streams` from the VOD), downloads the chat with TwitchDownloaderCLI into `<cache_dir>\<vod_id>\chat.json`, and uploads it to the service only when the stream has no chat yet. When the row's "VOD のずれ" is 0 and the computed offset (VOD start − stream start) is within ±120 s, it sets `vod_offset_sec`; a larger offset is left alone and mentioned in the plan and the notification. |
+| `scout` | 候補 | Runs Scout on the downloaded mp4 with `--yes --source` (no audio re-download, no prompt). Its normal rules apply, including the `cap_total` limit and the ±30 s exclusion around existing stamps. |
+| `render` | チャット動画 | For every live stamp of the stream (candidates and human stamps), renders the chat of [t − 15 s, t + 45 s] with TwitchDownloaderCLI `chatrender` as a transparent 400×1080 QuickTime file (qtrle, argb) to `_YYMMDD\chat\YYMMDD_chat_<stampId>.mov`. Stamps outside the VOD are skipped. |
+| `captions` | 字幕 | Writes the Whisper transcript of the same window as `_YYMMDD\captions\YYMMDD_caption_<stampId>.srt` (UTF-8 with BOM, CRLF, 20 characters per line, times relative to the Short's start). An empty window writes no file. |
+| `plan` | 計画 | Writes `_YYMMDD\peakaboo_<vodId>.json` and `_YYMMDD\peakaboo.json` (same content: date tag, stream and VOD ids, title, footage path, `pre_sec` / `post_sec`, and one entry per stamp with its chat video and caption paths or `null`) and shows a Windows toast "Peakaboo: 完了（候補 N・チャット動画 N・字幕 N）". |
+
+- Downloads go to a `.part` name first and are renamed when complete, so a half-written file never has its final name.
+- A failed step is retried on the next GraphQL check (every 10 minutes), resuming from that step. After three failures of the same step the job stops and a toast "Peakaboo: 失敗: <段> — <理由>" appears; a "いま実行" request or `--vod … --force` starts it again.
+- State lives in `%LOCALAPPDATA%\peakaboo\night\`: `state.json` for the configured `footage_root` (a different root, such as a test folder, gets its own `state_<8 hex>.json`), `night.log`, and `daemon.lock` (the PID of the running daemon). Under `pythonw`, Python's stdout and stderr also go to `night.log`. The token is never written to the log.
+
+Web: "夜の処理 … いま実行" (night run … run now):
+
+- The stream page (`/s/<stream_id>`) shows "夜の処理 <status> · いま実行" in the meta line. "いま実行" records a request (`night_requested_at`); the daemon picks it up within a minute. The VOD is the row's `vod_id`, else the VOD whose start is nearest to the stream's start within 60 minutes. A finished or stopped job is recreated and every step runs again, reusing the files that already exist.
+- While a request is open or a job is running, the button is disabled and the page re-reads the status every 10 seconds. The status texts:
+  - "要求済み" (requested): waiting for the daemon to pick it up.
+  - "PC 側の常駐が動いていないようです" (the daemon on the PC does not seem to be running): no reply five minutes after the request. See troubleshooting.
+  - "処理中: <段>" (running: step), for example "処理中: 開始", "処理中: VOD 保存", "処理中: チャット動画 3/11".
+  - "完了（候補 N・チャット動画 N・字幕 N）（YYYY-MM-DD HH:MM）" (done, with the time it finished).
+  - "失敗: <段> — <理由>（YYYY-MM-DD HH:MM）" (failed), for example "失敗: 計画 — VOD が見つかりません" (no VOD within 60 minutes of the stream start) or "失敗: 計画 — VOD はまだ録画中です" (the VOD is still recording; press again after the stream ends).
+
+Morning: "配信を取り込む" in Premiere Pro:
+
+1. Open the project in Premiere Pro. The panel must be connected to the service (see [サーバー / Server](#サーバー--server)).
+2. Click the "配信を取り込む" button (the download arrow next to the Short button). The popover shows "Footage の場所" (footage root; default `D:\Work_HDD\寺乃なあ\Footage`, remembered by the panel; paste paths with Japanese characters, because Japanese input does not work in the CEP panel) and "取り込み計画" (plan): every `_YYMMDD` folder that has a plan, newest first, as `_YYMMDD / peakaboo_<vodId>.json`. The newest is selected.
+3. Click "取り込む" (import). The status line goes through "素材を読み込み中", "同期中", "Short を作成中 (i/n)", "チャット動画を配置中", and "字幕を配置中":
+   1. The footage is imported into the bin `Footage/_YYMMDD`, and the full-length sequence `YYMMDD_<title>` is created in `Sequence/_YYMMDD` (or reused) and opened.
+   2. The service stream is opened, linked to that sequence with the offset −`vod_offset_sec` (the footage is the VOD, not the live timeline), and synced. On a freshly created sequence the confirmation drawer is skipped when its only reasons are the first sync and many additions; anything else (conflicts, mass deletion, warnings) stops there with "確認して同期したあと、もう一度「取り込む」を押してください".
+   3. One Short sequence per stamp in the plan is created as with "候補から Sequence を作る" (human stamps included, `pre_sec` / `post_sec` from the plan).
+   4. Each chat video is placed on V2 at 0 of its Short with an overwrite edit (V2 is added when missing; V1 and A1 are not touched). Chat videos are imported into `Footage/_YYMMDD/chat`.
+   5. Each caption file is imported into `Sequence/_YYMMDD/captions` and put on a caption track of its Short. When Premiere refuses, the file stays in the bin and the status line says "字幕は bin から各 Short へドラッグ" (drag the captions from the bin onto each Short).
+   6. The full-length sequence is made active again, and the status line ends with "Short N 本、チャット動画 N 本、字幕 N 本（<skip reasons>）", for example "チャット動画なし 2" or "マーカーが無い候補 1". One failure does not stop the others.
+4. The panel writes its progress back into the plan file it opened: `shorts` (stamp id → Short name, saved after every Short) and `placed` (stamp id → `chat` / `caption`). Pressing "取り込む" again skips what is done: the existing sequence, Shorts whose name is still in the project, and placed media.
+
+Re-run rules:
+
+- A re-run never downloads the VOD again when its file exists, and never overwrites a chat video or caption file with the same final name. To regenerate one, delete that file and run again.
+- `night.py --vod <id>` runs only the steps that are not done (nothing at all when the job is complete). `--force` recreates the job and runs every step; the footage name is kept when it is in the same day folder, and existing files are still reused.
+- The plan files are rewritten on every run, keeping the `shorts` and `placed` keys the panel wrote into each file.
+- Scout does not propose candidates again past `cap_total` or within ±30 s of existing (including deleted) candidates, so a re-run usually adds none ("新しい候補なし" in the toast).
+
+Testing a single VOD (`night.bat` / `--vod`):
+
+`scout\night.bat` is for development and testing only; the daemon is started by the scheduled task. It passes its arguments to `python -I night.py` and keeps the window open. Always point a test at a separate folder so the real footage folder is not touched:
+
+```bat
+scout\night.bat --vod 2914625472 --footage-root "C:\Work\Yato\Claude\_scratch\night_test\寺乃なあ\Footage"
+```
+
+| Option | Meaning |
+|---|---|
+| `--vod <id>` | Process this VOD once (it must be among the channel's newest 20 VODs) |
+| `--force` | With `--vod` only: recreate the job and run every step |
+| `--footage-root <dir>` | Footage root instead of `footage_root` (and a separate state file) |
+| `--config <path>` | Another `night.config.json`; `scout.config.json` is read from the same folder |
+| `--daemon` | Run the resident loop (what the scheduled task runs) |
+| `--tick` | Run one daemon cycle and exit (testing) |
+
+Exit codes: `--vod` returns `0` when every step is done, `1` when a step failed, `2` when it could not start (config, token, VOD not among the newest 20 or still recording). `--daemon` / `--tick` return `2` without a token and `3` when another daemon holds the lock.
+
+Troubleshooting:
+
+- **Look at `night.log` first**: `%LOCALAPPDATA%\peakaboo\night\night.log`. Each step logs its start, its end with the time taken, and the failure reason. A healthy idle daemon writes "tick: 要求 0 件・GQL 確認・実行 なし" every 10 minutes.
+- **Is the daemon running?** `Get-ScheduledTask 'Peakaboo Night'` should be `Running`, and `daemon.lock` holds its PID (`Get-Process -Id <pid>`). A lock left by a dead process is replaced automatically at the next start. "別の常駐が動いているため終了します" means a second copy (for example a manual `--tick`) found the running one; stop the task before testing with `--tick`.
+- **"トークンがありません" or HTTP 401**: put a valid `ytt_` token at the real `C:\Users\<you>\AppData\Roaming\peakaboo\scout.token` (from a normal terminal, see Setup 2), then `Start-ScheduledTask 'Peakaboo Night'`.
+- **The web page says "PC 側の常駐が動いていないようです"**: the daemon is not running or cannot reach the service; check the two items above.
+- **The web page stays at "処理中: …" after a crash or a reboot**: the daemon adopts such rows on every cycle. If the job had finished, it writes the last result back; otherwise it resumes from the step that was not done.
+- **The task runs old code after a merge**: re-run `install_night_task.ps1` from the current checkout (Setup 3).
 
 ## Lag compensation
 
@@ -319,10 +422,18 @@ The library tests cover Twitch URL parsing, offset and timecode calculations, cl
 node tests/test_lib.js --write-sample
 ```
 
-Scout's tests (signal scoring and the API client; no GPU, network, or VOD needed) run with:
+`node tests/test_panel_server.js` checks the panel's server client, and `node tests/test_panel_import.js` checks the pure helpers of "配信を取り込む" (`panel/js/import.js`: day folders, plan files, pending Shorts, the summary line) and the import wiring in the panel markup and `main.js`. `node tests/test_service_web.js` also covers the stream page's night-run status line (`service/web/js/night.js`).
+
+Scout's and the Night Runner's tests (signal scoring, the API client, GraphQL, the TwitchDownloaderCLI wrappers, the night-run rules, the steps with their resumable state, and the daemon; no GPU, network, VOD, or TwitchDownloaderCLI needed) run with:
 
 ```sh
 python -m unittest discover -s scout/tests -v
+```
+
+The full check before a commit:
+
+```sh
+node tests/test_lib.js && node tests/test_service_web.js && node tests/test_panel_server.js && node tests/test_panel_import.js && node tests/test_web_tokens.js && (cd service && npm test && npm run typecheck) && python -m unittest discover -s scout/tests -v
 ```
 
 ## Project layout
@@ -335,4 +446,8 @@ python -m unittest discover -s scout/tests -v
 - `service/` — Cloudflare Worker (D1 + R2 + static pages) for the cloud service; see `service/README.md`.
 - `tests/test_service_web.js` — dependency-free Node tests for the service's page logic (bins, chat shaping, VOD selection).
 - `scout/` — Scout, the local highlight-candidate tool: `scout.bat` / `scout.py` (CLI), `audio.py` (download, conversion, Whisper), `signals.py` (scoring), `api.py` (service client), `scout.config.json`, and `tests/`.
+- `scout/night.py` — the Night Runner (`--vod` one-shot, `--daemon`, `--tick`); `night_lib.py` (pure rules: start condition, footage names, SRT, plan, status texts), `td.py` (TwitchDownloaderCLI wrappers), `gql.py` (Twitch GraphQL live state and VOD list), `night.config.json`, `night.bat` (testing only), and `install_night_task.ps1` (the `Peakaboo Night` logon task; `-Uninstall` removes it).
+- `panel/js/import.js` — pure helpers of the panel's "配信を取り込む"; the ExtendScript side is `ytsImportStream` / `ytsPlaceChat` / `ytsPlaceCaption` in `panel/jsx/ppro.jsx`.
+- `service/web/js/night.js` — the stream page's night-run status line; `service/migrations/0002_night.sql` adds the three `night_*` columns.
+- `tests/test_panel_import.js` — tests of `panel/js/import.js` and the import wiring.
 - `samples/sample.csv` — example sync-file data including a multiline Japanese memo.
