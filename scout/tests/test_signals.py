@@ -19,19 +19,24 @@ class SignalsTest(unittest.TestCase):
         self.assertTrue((z == 0).all())
 
     def test_voice_spike_threshold(self):
-        db = np.array([-40.0] * 20 + [-30.0])
-        self.assertAlmostEqual(signals.voice_spike(db)[20], 1.25)
-        db[20] = -35.0
-        self.assertEqual(signals.voice_spike(db)[20], 0.0)
+        # 直前 120 ビン（60 秒）の中央値が基準。直前 20 ビンだけ大きくても基準は -40 のまま
+        # Baseline is the median of the previous 120 bins (60 s); louder last 20 bins keep it at -40
+        db = np.array([-40.0] * 100 + [-32.0] * 20 + [-30.0])
+        self.assertAlmostEqual(signals.voice_spike(db)[120], 1.25)
+        db[120] = -35.0
+        self.assertEqual(signals.voice_spike(db)[120], 0.0)
 
     def test_laughter_from_words_and_peaks(self):
         db = np.full(60, -40.0)
         out = signals.laughter(db, [{'start': 10, 'end': 11, 'text': 'あははは笑'}], 60)
         self.assertEqual(list(out[19:23]), [0, 1, 1, 0])
-        db[[40, 41, 43]] = -30.0  # 4 ビン内に 3 ピーク / 3 peaks within 4 bins
+        db[[40, 43, 46]] = -30.0  # 8 ビン内に極大が 3 つ / 3 local maxima within 8 bins
         out = signals.laughter(db, [], 60)
-        self.assertEqual(out[40], 1)
+        self.assertEqual(list(out[40:47]), [1, 0, 0, 1, 0, 0, 1])
         self.assertEqual(out[10], 0)
+        plateau = np.full(60, -40.0)
+        plateau[40:43] = -30.0  # 隣接した 3 ビンの台地は極大 1 つ / a 3-bin plateau is one local maximum
+        self.assertEqual(signals.laughter(plateau, [], 60).sum(), 0)
         out = signals.laughter(np.full(60, -40.0), [{'start': -5, 'end': -2, 'text': '笑'}], 60)
         self.assertEqual(out[0], 0)  # 0 秒より前のセグメントは塗らない / segment before 0 paints nothing
 
@@ -134,8 +139,8 @@ class SignalsTest(unittest.TestCase):
 
     def test_composite_voice_scaled(self):
         _, contrib = signals.composite({'voice': np.array([1.5, 4.0])}, {'voice': 1.0})
-        self.assertAlmostEqual(contrib['voice'][0], 0.5)
-        self.assertAlmostEqual(contrib['voice'][1], 1.0)
+        self.assertAlmostEqual(contrib['voice'][0], 0.2835, places=3)
+        self.assertAlmostEqual(contrib['voice'][1], 0.8647, places=3)
 
     def test_threshold_needs_two_signals(self):
         thr = signals.threshold(2.0, W, set(W))
@@ -143,9 +148,17 @@ class SignalsTest(unittest.TestCase):
         laugh_only, _ = signals.composite({'laugh': one, 'voice': zero}, W)
         keyword_only, _ = signals.composite({'keyword': one, 'voice': zero}, W)
         both, _ = signals.composite({'laugh': one, 'voice': np.array([3.0])}, W)
+        three, _ = signals.composite({'laugh': one, 'voice': np.array([3.0]), 'keyword': np.array([0.8])}, W)
         self.assertLess(laugh_only[0], thr)
         self.assertLess(keyword_only[0], thr)
-        self.assertGreaterEqual(both[0], thr)
+        self.assertAlmostEqual(both[0], 1.736, places=3)
+        self.assertLess(both[0], thr)
+        self.assertGreaterEqual(both[0], signals.threshold(2.0, W, {'voice', 'laugh', 'keyword'}))  # チャット無しのしきい値 / no-chat threshold
+        self.assertGreaterEqual(three[0], thr)
+
+    def test_is_candidate_public(self):
+        self.assertTrue(signals.is_candidate(' 候補：発言'))
+        self.assertFalse(signals.is_candidate('人のメモ'))
 
 
 if __name__ == '__main__':

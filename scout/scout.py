@@ -9,6 +9,7 @@ Only the 13 stamp columns are sent; the transcript and audio stay in the local c
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ import secrets
 import subprocess
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -71,7 +73,8 @@ def read_token(path: Path) -> str:
         if token.startswith('ytt_'):
             return token
         raise ScoutExit(2, f'ERR: トークンファイルの形式が違います / The token file is malformed: {path}')
-    token = input('Peakaboo の /me で発行した ytt_ トークンを貼り付けてください / Paste the ytt_ token issued on /me: ').strip()
+    # 画面に残さないため getpass（貼り付けても表示されない）/ getpass so the pasted token is not echoed
+    token = getpass.getpass('Peakaboo の /me で発行した ytt_ トークンを貼り付けてください / Paste the ytt_ token issued on /me: ').strip()
     if not token.startswith('ytt_'):
         raise ScoutExit(2, 'ERR: ytt_ で始まるトークンではありません / The token must start with ytt_')
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +93,11 @@ def check_member(me: dict, channel: str) -> str:
     return login
 
 
+def seg(value: str) -> str:
+    """URL のパス 1 区切り分としてエスケープ / Escape one URL path segment."""
+    return urllib.parse.quote(str(value), safe='')
+
+
 def _jst(started_at: str | None) -> str:
     if not started_at:
         return '—'
@@ -99,7 +107,7 @@ def _jst(started_at: str | None) -> str:
 def choose_stream(client: api.Client, channel: str) -> str:
     """最新 15 件を表にして選んでもらう。Enter で既定、番号で選択、それ以外は 1 回だけ聞き直す。
     Show the newest 15 streams and ask. Enter picks the default, a number picks that row, anything else re-asks once."""
-    body = client.get(f'/api/channels/{channel}/streams') or {}
+    body = client.get(f'/api/channels/{seg(channel)}/streams') or {}
     streams = sorted(body.get('streams') or [], key=lambda s: s.get('started_at') or '', reverse=True)
     if not streams:
         raise ScoutExit(1, f'配信がありません / No streams for {channel}')
@@ -129,6 +137,13 @@ def attach_log_file(path: Path) -> None:
     log.addHandler(fh)
 
 
+class _MessageOnly(logging.Formatter):
+    """画面にはメッセージだけ（トレースバックはファイルにだけ残す）/ Message only on screen; tracebacks go to the file only."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return record.getMessage()
+
+
 class Stage:
     """段の名前と所要秒をログに出す / Log a stage's name and elapsed seconds."""
 
@@ -150,11 +165,15 @@ class Stage:
 def prepare_audio(vod_id: str, cache: Path, whisper_cfg: dict) -> tuple[np.ndarray, int, list[dict]]:
     """音声 → 16 kHz WAV → 文字起こし（それぞれキャッシュがあれば再利用）。
     Audio -> 16 kHz WAV -> transcript, each reused from the cache when present."""
-    with Stage('yt-dlp (audio.fetch_audio)'):
-        src = audio.fetch_audio(vod_id, cache)
     wav = cache / 'audio16k.wav'
-    with Stage('ffmpeg (audio.to_wav16k)'):
-        if not wav.exists():
+    # 採点に音声のサンプルが要るので、元音声を省けるのは WAV がキャッシュにあるときだけ
+    # Scoring needs the samples, so the source audio can be skipped only when the WAV is cached
+    if wav.exists():
+        log.info('stage yt-dlp / ffmpeg skipped: %s を再利用 / reused', wav.name)
+    else:
+        with Stage('yt-dlp (audio.fetch_audio)'):
+            src = audio.fetch_audio(vod_id, cache)
+        with Stage('ffmpeg (audio.to_wav16k)'):
             audio.to_wav16k(src, wav)
     samples, sr = audio.load_wav(wav)
     log.info('音声 / audio: %s, %.0f 秒 / sec, %d Hz', wav.name, len(samples) / sr, sr)
@@ -173,13 +192,15 @@ def prepare_audio(vod_id: str, cache: Path, whisper_cfg: dict) -> tuple[np.ndarr
     return samples, sr, segments
 
 
-def chat_rows(chat: dict | None) -> list[tuple[float, str]]:
+def chat_rows(chat: dict | None, chat_lag_sec: float = 0.0) -> list[tuple[float, str]]:
     """`comments: [[vod_sec, login, display, text], …]` から (秒, 本文)。壊れた行は飛ばす。
-    (seconds, text) from the comments rows; malformed rows are skipped."""
+    反応の遅れ chat_lag_sec を引き、Web のグラフ（shiftTimes）と同じ時刻に揃える。
+    (seconds, text) from the comments rows; malformed rows are skipped.
+    chat_lag_sec (reaction delay) is subtracted so times match the web graph (shiftTimes)."""
     rows = []
     for c in (chat or {}).get('comments') or []:
         if isinstance(c, list) and len(c) >= 4 and isinstance(c[0], (int, float)):
-            rows.append((float(c[0]), str(c[3])))
+            rows.append((float(c[0]) - chat_lag_sec, str(c[3])))
     return rows
 
 
@@ -198,28 +219,9 @@ def build_signals(cfg: dict, db: np.ndarray, segments: list[dict],
     return sigs
 
 
-def replace_own_candidates(client: api.Client, stamps: list[dict], by: str, dry_run: bool) -> int:
-    """自分の生きている候補を墓標にして先に送る。dry-run は件数だけ。墓標にした（する）件数を返す。
-    Tombstone the user's own alive candidates first; dry-run only counts. Returns how many were (would be) tombstoned."""
-    # 候補の判定は signals と同じ規則を使う / same candidate rule as signals
-    mine = [s for s in stamps if s.get('by') == by and not s.get('deleted')
-            and signals._is_candidate(s.get('memo', ''))]
-    if dry_run:
-        log.info('--replace: %d 件を削除予定（dry-run のため送信しません）/ %d would be tombstoned (dry-run, not sent)',
-                 len(mine), len(mine))
-        return len(mine)
-    if not mine:
-        log.info('--replace: 自分の候補はありません / no own candidates')
-        return 0
-    ts = now_iso()
-    tombs = [{**s, 'deleted': True, 'updated_at': ts} for s in mine]
-    result = client.post('/api/stamps', {'records': tombs, 'source': 'scout'})
-    accepted, rejected = result.get('accepted') or [], result.get('rejected') or []
-    log.info('--replace: 削除 %d 件、拒否 %d 件 / tombstoned %d, rejected %d',
-             len(accepted), len(rejected), len(accepted), len(rejected))
-    for r in rejected:
-        log.info('  拒否 / rejected %s: %s', r.get('id'), r.get('reason'))
-    return len(mine)
+def own_alive_candidates(stamps: list[dict], by: str) -> list[dict]:
+    """自分の生きている候補（--replace で墓標にするもの）/ The user's own alive candidates (tombstoned by --replace)."""
+    return [s for s in stamps if s.get('by') == by and not s.get('deleted') and signals.is_candidate(s.get('memo', ''))]
 
 
 def run(args: argparse.Namespace) -> int:
@@ -235,12 +237,14 @@ def run(args: argparse.Namespace) -> int:
         me = client.get('/api/me')
     except api.ApiError as e:
         if e.status == 401:
-            raise ScoutExit(2, 'ERR: トークンが無効です。/me で発行し直してください / The token is invalid. Issue a new one on /me') from None
+            path = cfg['token_path']
+            raise ScoutExit(2, f'ERR: トークンが無効です。/me で発行し直し、{path} を書き換えてください'
+                               f' / Token invalid: issue a new one on /me and replace {path}') from None
         raise
     by = check_member(me if isinstance(me, dict) else {}, cfg['channel'])
 
     stream_id = args.stream or choose_stream(client, cfg['channel'])
-    body = client.get(f'/api/streams/{stream_id}')
+    body = client.get(f'/api/streams/{seg(stream_id)}')
     stream = body.get('stream') if isinstance(body, dict) else None
     if not stream:
         raise ScoutExit(2, f'ERR: 配信が見つかりません / Stream not found: {stream_id}')
@@ -258,15 +262,20 @@ def run(args: argparse.Namespace) -> int:
     samples, sr, segments = prepare_audio(str(vod_id), cache, whisper_cfg)
 
     with Stage('fetch (api stamps + chat)'):
-        stamps_body = client.get(f'/api/streams/{stream_id}/stamps')
+        stamps_body = client.get(f'/api/streams/{seg(stream_id)}/stamps')
         stamps = (stamps_body.get('records') if isinstance(stamps_body, dict) else stamps_body) or []
-        chat = client.get(f'/api/streams/{stream_id}/chat')
-        comments = chat_rows(chat if isinstance(chat, dict) else None)
+        chat = client.get(f'/api/streams/{seg(stream_id)}/chat')
+        comments = chat_rows(chat if isinstance(chat, dict) else None, float(stream.get('chat_lag_sec') or 0.0))
     log.info('既存スタンプ / existing stamps: %d（墓標込み / incl. tombstones）、チャット / chat: %d', len(stamps), len(comments))
+    if not comments:
+        log.info('チャット信号なし / no chat signals')
 
-    blocked, existing_alive = signals.stamps_to_blocked(stamps, vod_offset)
-    if args.replace:
-        existing_alive = max(0, existing_alive - replace_own_candidates(client, stamps, by, args.dry_run))
+    # --replace: 自分の生きている候補は置き換えるので、除外にも上限の既存数にも数えない（以前に消した候補は除外のまま）
+    # --replace: own alive candidates are being replaced, so they neither block nor count toward the cap
+    # (earlier-deleted candidates stay blocked)
+    tombstoned = own_alive_candidates(stamps, by) if args.replace else []
+    replaced_ids = {s.get('id') for s in tombstoned}
+    blocked, existing_alive = signals.stamps_to_blocked([s for s in stamps if s.get('id') not in replaced_ids], vod_offset)
 
     with Stage('score (signals)'):
         db = signals.rms_db(samples, sr)
@@ -285,11 +294,10 @@ def run(args: argparse.Namespace) -> int:
         log.info('候補なし / No candidates')
         return 1
 
-    if not comments:
-        log.info('チャット信号なし / no chat signals')
     ts = now_iso()
     records = []
-    log.info('%3s  %-8s  %-8s  %5s  %s  |  %s', '#', '配信時刻', 'VOD時刻', '点', '理由', '発言')
+    log.info('%3s  %-8s  %-8s  %5s  %s  |  %s', '#', '配信時刻 / stream', 'VOD時刻 / VOD', '点 / score',
+             '理由 / reason', '発言 / utterance')
     for i, (t_vod, sc) in enumerate(picked, 1):
         b = min(max(int(t_vod / signals.BIN_SEC), 0), len(db) - 1)
         why = signals.reason({k: float(v[b]) for k, v in contrib.items()}, cfg['names'], weights)
@@ -297,16 +305,26 @@ def run(args: argparse.Namespace) -> int:
         records.append(signals.to_record(t_vod, vod_offset, stream, by, signals.memo(why, said), ts, new_id()))
         log.info('%3d  %s  %s  %5.2f  %s  |  %s', i, hms(t_vod + vod_offset), hms(t_vod), sc, why, said)
 
+    if args.replace:
+        log.info('自分の候補 %d 件を墓標にします / %d own candidates will be tombstoned', len(tombstoned), len(tombstoned))
+
     if args.dry_run:
-        log.info('dry-run のため送信しません / dry-run: nothing sent')
+        log.info('dry-run のため送信しません（新規 %d 件・墓標 %d 件）/ dry-run: nothing sent (%d new, %d tombstones)',
+                 len(records), len(tombstoned), len(records), len(tombstoned))
         return 0
     answer = input('送信しますか？ / Send? y/N: ').strip().lower()
     if answer != 'y':
         log.info('送信しませんでした / Not sent')
         return 1
-    result = client.post('/api/stamps', {'records': records, 'source': 'scout'})
+    # 墓標と新しい候補を 1 回の POST で送る（確認前には何も書かない）
+    # Tombstones and new candidates go in one POST; nothing is written before confirmation
+    tombs = [{**s, 'deleted': True, 'updated_at': ts} for s in tombstoned]
+    result = client.post('/api/stamps', {'records': tombs + records, 'source': 'scout'})
     accepted, rejected = result.get('accepted') or [], result.get('rejected') or []
-    log.info('受理 / accepted: %d、拒否 / rejected: %d', len(accepted), len(rejected))
+    tomb_ids = {t['id'] for t in tombs}
+    n_tomb = sum(1 for a in accepted if a in tomb_ids)
+    log.info('受理 / accepted: %d（新規 / new %d、墓標 / tombstones %d）、拒否 / rejected: %d',
+             len(accepted), len(accepted) - n_tomb, n_tomb, len(rejected))
     for r in rejected:
         log.info('  拒否 / rejected %s: %s', r.get('id'), r.get('reason'))
     if not accepted:
@@ -338,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     log.setLevel(logging.INFO)
     sh = logging.StreamHandler(sys.stdout)
-    sh.setFormatter(logging.Formatter('%(message)s'))
+    sh.setFormatter(_MessageOnly())
     log.addHandler(sh)
     try:
         return run(args)
@@ -352,7 +370,13 @@ def main(argv: list[str] | None = None) -> int:
         log.error('ERR: %s が失敗しました / %s failed (exit %s)', e.cmd[0], e.cmd[0], e.returncode)
         return 2
     except (RuntimeError, ValueError, OSError) as e:
-        log.error('ERR: %s', e)
+        log.error('ERR: エラー / error: %s', e)
+        return 2
+    except KeyboardInterrupt:
+        log.info('中断しました / Interrupted')
+        return 1
+    except Exception as e:  # 想定外でも戻りコード 2 を守る / keep exit code 2 for anything unexpected
+        log.error('ERR: 予期しないエラー / unexpected error: %s: %s', type(e).__name__, e, exc_info=True)
         return 2
 
 

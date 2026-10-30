@@ -37,6 +37,14 @@ class ApiClientTest(unittest.TestCase):
         self.assertTrue(req.get_header('User-agent').startswith('Mozilla/5.0'))
         self.assertEqual(req.get_header('Authorization'), 'Bearer ytt_x')
 
+    def test_default_user_agent(self):
+        client = api.Client('https://x', 'ytt_x')
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(b'{}')) as urlopen:
+            client.get('/api/me')
+        ua = urlopen.call_args[0][0].get_header('User-agent')
+        self.assertTrue(ua.startswith('Mozilla/5.0'))
+        self.assertIn('Peakaboo-Scout', ua)
+
     def test_no_chat_returns_none(self):
         with mock.patch('urllib.request.urlopen', side_effect=_http_error(404, {'error': 'no_chat'})):
             self.assertIsNone(self.client.get('/api/streams/s1/chat'))

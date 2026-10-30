@@ -28,7 +28,10 @@ Peak = tuple[float, float]  # (vod_time_sec, score)
 # 合成前の正規化表。疎な 0/1 信号を z 化すると 1 区間で z≈95 になりしきい値が効かないため、各信号を [0, 1] に揃える。
 # Normalisation table: z-scoring sparse 0/1 signals gives z≈95 for one segment, so every signal is mapped to [0, 1].
 ZSCORED = ('chat',)  # 密な連続信号: clip(z, 0, 3) / 3 / dense continuous signal
-SCALED = ('voice',)  # voice_spike の diff/min_db: clip(v, 0, 3) / 3 / already diff/min_db
+# voice_spike の diff/min_db（発火時 >= 1）: 1 - exp(-(v - 1) / 1.5)。上限で切らず、大きな跳ねほど 1 に近づく（8 dB → 0、16 dB → 0.49、24 dB → 0.74）
+# voice_spike's diff/min_db (>= 1 when firing): 1 - exp(-(v - 1) / 1.5), no hard cap: bigger jumps approach 1 (8 dB -> 0, 16 dB -> 0.49, 24 dB -> 0.74)
+EXP_SCALED = ('voice',)
+_VOICE_SCALE = 1.5
 # 他（laugh / keyword / chat_text）は 0..1 にクリップ / others are clipped to 0..1
 
 
@@ -60,9 +63,9 @@ def _rise(db: np.ndarray, window_bins: int) -> np.ndarray:
     return out
 
 
-def voice_spike(db: np.ndarray, window_bins: int = 20, min_db: float = 8.0) -> np.ndarray:
-    """声の急変: 上昇量が min_db 以上なら diff / min_db、未満は 0。
-    Voice spike: diff / min_db when the rise is at least min_db, else 0."""
+def voice_spike(db: np.ndarray, window_bins: int = 120, min_db: float = 8.0) -> np.ndarray:
+    """声の急変: 直前 window_bins（既定 60 秒）の中央値からの上昇量が min_db 以上なら diff / min_db、未満は 0。
+    Voice spike: diff / min_db when the rise over the previous window_bins (60 s by default) is at least min_db, else 0."""
     diff = _rise(db, window_bins)
     return np.where(diff >= min_db, diff / min_db, 0.0)
 
@@ -79,17 +82,24 @@ def _segment_bins(seg: dict, n_bins: int) -> slice:
 
 def laughter(db: np.ndarray, segments: list[dict], n_bins: int,
              laugh_words: tuple[str, ...] = ('笑', 'ハハ', 'www', 'ｗ'), peak_db: float = 6.0) -> np.ndarray:
-    """笑い: 笑いの語を含むセグメントの区間、または 2 秒（4 ビン）内に短いピークが 3 回以上ある区間を 1。
-    Laughter: 1 over segments containing a laugh word, or where 3+ short peaks fall within 2 s (4 bins)."""
+    """笑い: 笑いの語を含むセグメントの区間を 1。加えて、短いピーク（直前 20 ビンの中央値を peak_db 以上超える極大）が
+    連続 8 ビン（4 秒）内に 3 つ以上あれば、そのピークのビンを 1。台地（同じ高さの連続）は極大 1 つと数える。
+    Laughter: 1 over segments containing a laugh word. Also, when 3+ short peaks (local maxima exceeding the median of the
+    previous 20 bins by peak_db) fall within any 8 consecutive bins (4 s), those peak bins are 1. A plateau counts as one maximum."""
     out = np.zeros(n_bins)
     for seg in segments:
         if any(w in seg['text'] for w in laugh_words):
             out[_segment_bins(seg, n_bins)] = 1.0
-    peak = (_rise(db, 20) >= peak_db)[:n_bins]
-    for j in range(max(0, len(peak) - 3)):
-        win = peak[j:j + 4]
+    db = np.asarray(db, dtype=np.float64)
+    peak = np.zeros(len(db), dtype=bool)
+    if len(db) >= 3:
+        peak[1:-1] = (db[1:-1] > db[:-2]) & (db[1:-1] >= db[2:])
+    peak &= _rise(db, 20) >= peak_db
+    peak = peak[:n_bins]
+    for j in range(max(0, len(peak) - 7)):
+        win = peak[j:j + 8]
         if win.sum() >= 3:
-            out[j:j + 4][win] = 1.0
+            out[j:j + 8][win] = 1.0
     return out
 
 
@@ -151,8 +161,9 @@ def _normalise(key: str, v: np.ndarray) -> np.ndarray:
     Map a signal to [0, 1] following the normalisation table."""
     if key in ZSCORED:
         return np.clip(zscore(v), 0.0, 3.0) / 3.0
-    if key in SCALED:
-        return np.clip(np.asarray(v, dtype=np.float64), 0.0, 3.0) / 3.0
+    if key in EXP_SCALED:
+        v = np.asarray(v, dtype=np.float64)
+        return np.where(v >= 1.0, 1.0 - np.exp(-(np.maximum(v, 1.0) - 1.0) / _VOICE_SCALE), 0.0)
     return np.clip(np.asarray(v, dtype=np.float64), 0.0, 1.0)
 
 
@@ -193,7 +204,7 @@ def exclude(peaks: list[Peak], blocked_vod_times: list[float], radius_sec: float
     return [p for p in peaks if all(abs(p[0] - b) > radius_sec for b in blocked_vod_times)]
 
 
-def _is_candidate(memo_text: str) -> bool:
+def is_candidate(memo_text: str) -> bool:
     """memo が `候補:` / `候補：` で始まるか（先頭空白可）。
     Whether the memo starts with the candidate prefix (either colon, leading whitespace allowed)."""
     return bool(_CANDIDATE_RE.match(memo_text or ''))
@@ -205,7 +216,7 @@ def stamps_to_blocked(stamps: list[dict], vod_offset_sec: float) -> tuple[list[f
     blocked: list[float] = []
     alive = 0
     for s in stamps:
-        cand, deleted = _is_candidate(s.get('memo', '')), bool(s.get('deleted'))
+        cand, deleted = is_candidate(s.get('memo', '')), bool(s.get('deleted'))
         if cand or not deleted:
             blocked.append(float(s['offset_sec']) - vod_offset_sec)
         alive += cand and not deleted
