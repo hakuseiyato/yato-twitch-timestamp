@@ -529,6 +529,53 @@ const TSLib = (function () {
     };
   }
 
+  // サーバー配信の鏡 CSV のパス（baseDir/server/<host>/<stream_id>_sync.csv）。host と stream_id の英数・_・-・. 以外は _ に
+  // （host:port の : は Windows のフォルダ名に使えない）
+  // Path of a server stream's mirror CSV; characters in host and stream_id other than alphanumerics, _, - and . become _
+  // (the : of host:port is not allowed in Windows folder names).
+  function serverMirrorPath(baseDir, serverUrl, streamId) {
+    const base = String(baseDir || '').replace(/[\\/]+$/, '');
+    const host = new URL(serverUrl).host.replace(/[^A-Za-z0-9_.-]/g, '_');
+    const safeId = String(streamId || '').replace(/[^A-Za-z0-9_.-]/g, '_');
+    return base + '/server/' + host + '/' + safeId + '_sync.csv';
+  }
+
+  // 前回 push より後に変わった記録を送信形（toUploadRecord）で返す。lastPushAt が空・不正なら全件
+  // Returns records changed after the last push, shaped by toUploadRecord; all of them when lastPushAt is empty or invalid.
+  function recordsToPush(records, lastPushAt) {
+    const since = Date.parse(lastPushAt || '');
+    return (records || []).filter(function (record) {
+      if (!record) return false;
+      if (!Number.isFinite(since)) return true;
+      const at = Date.parse(record.updated_at || record.created_at || '');
+      // 時刻が読めない記録は送る（サーバー側で invalid_time になる）/ Unreadable times are sent (the server rejects them)
+      return !Number.isFinite(at) || at > since;
+    }).map(toUploadRecord);
+  }
+
+  // サーバーの記録を鏡 CSV の記録に取り込む（updated_at が新しい方が勝つ）。changed は追加 + 更新の件数
+  // Merges server records into the mirror's records (newer updated_at wins); changed counts additions and updates.
+  function mergeServerRecords(localRecords, serverRecords) {
+    const records = mergeRecords(localRecords || [], serverRecords || []);
+    const localById = new Map();
+    (localRecords || []).forEach(function (record) {
+      const normalized = normalizeRecord(record);
+      localById.set(normalized.id, normalized);
+    });
+    let changed = 0;
+    records.forEach(function (record) {
+      const local = localById.get(record.id);
+      if (!local || local.updated_at !== record.updated_at) changed += 1;
+    });
+    return { records: records, changed: changed };
+  }
+
+  // 鏡 CSV の横に置く <stream_id>.server.json の形か / Whether obj has the shape of a mirror's <stream_id>.server.json
+  function isServerMeta(obj) {
+    const nonEmpty = function (value) { return typeof value === 'string' && value !== ''; };
+    return !!obj && typeof obj === 'object' && nonEmpty(obj.serverUrl) && nonEmpty(obj.stream_id) && nonEmpty(obj.channel);
+  }
+
   function groupByStream(records) {
     const groups = new Map();
     for (const record of records) {
@@ -1178,7 +1225,11 @@ const TSLib = (function () {
     isRetryableUpload: isRetryableUpload,
     toUploadRecord: toUploadRecord,
     reasonText: reasonText,
-    recordSyncState: recordSyncState
+    recordSyncState: recordSyncState,
+    serverMirrorPath: serverMirrorPath,
+    recordsToPush: recordsToPush,
+    mergeServerRecords: mergeServerRecords,
+    isServerMeta: isServerMeta
   };
 }());
 

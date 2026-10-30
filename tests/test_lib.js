@@ -1010,6 +1010,28 @@ assert.strictEqual(TSLib.frameFileName(5, 30, 'x'.repeat(80)), '00-00-05-00_' + 
   assert.deepStrictEqual(TSLib.fractionsToPos({ right: 0, bottom: 0 }, 1200, 40, 1000, 600).left, 4);
 }
 
+// サーバー鏡 CSV のパス・push 対象・サーバー取り込み・meta の形
+// Server mirror CSV path, records to push, merging server records, and the meta shape.
+{
+  assert.strictEqual(TSLib.serverMirrorPath('C:/u/data', 'https://a.b.workers.dev', 'vod-12'), 'C:/u/data/server/a.b.workers.dev/vod-12_sync.csv');
+  assert.strictEqual(TSLib.serverMirrorPath('/d', 'https://h', 'x/../y'), '/d/server/h/x_.._y_sync.csv');
+  // 末尾の区切りは 1 つにまとめ、host:port の : は _ に / A trailing separator is dropped; the : of host:port becomes _
+  assert.strictEqual(TSLib.serverMirrorPath('/d/', 'https://h:8443/x', 'a b'), '/d/server/h_8443/a_b_sync.csv');
+  const p = TSLib.recordsToPush([{ id: 'a', updated_at: '2026-01-02T00:00:00.000Z', offset_sec: 1, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }, { id: 'b', updated_at: '2026-01-01T00:00:00.000Z', offset_sec: 2, created_at: '2026-01-01T00:00:00.000Z', by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }], '2026-01-01T12:00:00.000Z');
+  assert.deepStrictEqual(p.map(r => r.id), ['a']); assert.strictEqual(p[0].timecode, '00:00:01');
+  assert.strictEqual(TSLib.recordsToPush([{ id: 'c', created_at: '2026-01-01T00:00:00.000Z', offset_sec: 0, by: 'u', memo: '', stream_id: 's', channel: 'c', started_at: '2026-01-01T00:00:00.000Z' }], '').length, 1);
+  // mergeRecords は不正な id を legacyId に置き換えるので、サーバーと同じく正しい id を使う
+  // mergeRecords replaces invalid ids with legacyId, so use valid ids as the server does.
+  const m = TSLib.mergeServerRecords([{ id: 'y00000aa', memo: 'old', updated_at: '2026-01-01T00:00:00.000Z' }], [{ id: 'y00000aa', memo: 'new', updated_at: '2026-01-02T00:00:00.000Z' }, { id: 'y00000ff', memo: '', updated_at: '2026-01-02T00:00:00.000Z' }]);
+  assert.strictEqual(m.records.find(r => r.id === 'y00000aa').memo, 'new'); assert.strictEqual(m.changed, 2);
+  // 同じ内容をもう一度取り込んでも変化なし / Merging the same records again changes nothing
+  assert.strictEqual(TSLib.mergeServerRecords(m.records, m.records).changed, 0);
+  // ローカルの方が新しければローカルが残り、変化なし / A newer local record stays and counts as no change
+  const keep = TSLib.mergeServerRecords([{ id: 'y00000aa', memo: 'mine', updated_at: '2026-01-03T00:00:00.000Z' }], [{ id: 'y00000aa', memo: 'new', updated_at: '2026-01-02T00:00:00.000Z' }]);
+  assert.strictEqual(keep.records[0].memo, 'mine'); assert.strictEqual(keep.changed, 0);
+  assert.strictEqual(TSLib.isServerMeta({ serverUrl: 'https://h', stream_id: 's', channel: 'c' }), true); assert.strictEqual(TSLib.isServerMeta({}), false);
+}
+
 // ExtendScript's $.evalFile decodes BOM-less files with the system code page (cp932) and fails on UTF-8 Japanese.
 for (const jsx of ['ppro.jsx', 'aeft.jsx']) {
   const head = fs.readFileSync(path.resolve(__dirname, '../panel/jsx/' + jsx)).subarray(0, 3);
