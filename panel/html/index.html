@@ -13,6 +13,22 @@
       <button id="newCsv" class="small secondary" type="button" title="今のシーケンス（コンポ）のマーカーから同期 CSV を新規作成" aria-label="同期 CSV を新規作成">新規</button>
       <button id="pickCsv" class="small secondary" type="button" title="同期 CSV を選択" aria-label="同期 CSV を選択">CSV</button>
       <button id="mergeCsv" class="small secondary" type="button" title="ほかの CSV を同期ファイルに統合（複数選択可）" aria-label="CSV を統合">統合</button>
+      <div class="server-control">
+        <button id="serverBtn" class="small secondary" type="button" title="サーバーの配信を同期元にする / Use a server stream as the sync source" aria-label="サーバー / Server" aria-haspopup="dialog" aria-expanded="false">サーバー</button>
+        <div id="serverPopover" class="server-popover" role="dialog" aria-label="サーバー / Server" hidden>
+          <label class="server-field"><span>URL</span><input id="serverUrl" type="url" placeholder="https://…workers.dev" autocomplete="off" spellcheck="false"></label>
+          <label class="server-field"><span>トークン / Token</span><input id="serverToken" type="password" placeholder="ytt_…" autocomplete="off" spellcheck="false"></label>
+          <div class="server-buttons">
+            <button id="serverConnect" class="primary" type="button">接続 / Connect</button>
+            <button id="serverClose" class="secondary" type="button">閉じる / Close</button>
+          </div>
+          <div id="serverPicker" class="server-picker" hidden>
+            <label class="server-field"><span>チャンネル / Channel</span><select id="serverChannel"></select></label>
+            <label class="server-field"><span>配信 / Stream</span><select id="serverStream"></select></label>
+            <button id="serverOpen" class="primary" type="button" disabled>この配信を開く / Open this stream</button>
+          </div>
+        </div>
+      </div>
       <div class="offset-control">
         <button id="offsetBtn" class="small secondary icon-label-button" type="button" title="オフセット" aria-label="オフセット" aria-haspopup="dialog" aria-expanded="false">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.5V8l2.5 1.5"></path></svg>
@@ -73,6 +89,7 @@
   </main>
   <script src="../js/libs/CSInterface.js"></script>
   <script src="../js/lib.js"></script>
+  <script src="../js/server.js"></script>
   <script src="../js/main.js"></script>
 </body>
 </html>

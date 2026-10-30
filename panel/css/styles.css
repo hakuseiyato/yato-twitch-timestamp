@@ -47,6 +47,15 @@ button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-all
 .offset-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .offset-buttons button { min-width: 0; padding: 2px; }
 .offset-reset { width: 100%; margin-top: 4px; }
+/* 同期元「サーバー」のポップオーバー（オフセットと同じ形） / The "server" sync source popover (same pattern as the offset one) */
+.server-control { position: relative; flex: none; }
+.server-popover { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: min(260px, calc(100vw - 16px)); padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); box-shadow: 0 4px 14px #0008; white-space: normal; }
+.server-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; color: var(--secondary); }
+.server-field input, .server-field select { width: 100%; min-width: 0; color: var(--text); }
+.server-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.server-buttons button, .server-picker button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.server-picker > button { width: 100%; }
 .checkbox-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 4px 0; color: var(--secondary); cursor: pointer; }
 .checkbox-row input { flex: none; width: auto; height: auto; min-height: 0; margin: 0; }
 .checkbox-row span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

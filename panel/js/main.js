@@ -10,6 +10,16 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     newCsv: document.getElementById('newCsv'),
     pickCsv: document.getElementById('pickCsv'),
     mergeCsv: document.getElementById('mergeCsv'),
+    serverBtn: document.getElementById('serverBtn'),
+    serverPopover: document.getElementById('serverPopover'),
+    serverUrl: document.getElementById('serverUrl'),
+    serverToken: document.getElementById('serverToken'),
+    serverConnect: document.getElementById('serverConnect'),
+    serverClose: document.getElementById('serverClose'),
+    serverPicker: document.getElementById('serverPicker'),
+    serverChannel: document.getElementById('serverChannel'),
+    serverStream: document.getElementById('serverStream'),
+    serverOpen: document.getElementById('serverOpen'),
     exportFramesBtn: document.getElementById('exportFramesBtn'),
     stream: document.getElementById('stream'),
     offsetBtn: document.getElementById('offsetBtn'),
@@ -42,7 +52,7 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     markerList: document.getElementById('markerList')
   };
   const storageKey = 'yts.csvPath.' + hostApp;
-  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.exportFramesBtn, elements.stream, elements.offsetBtn, elements.linkTarget,
+  const allControls = [elements.newCsv, elements.pickCsv, elements.mergeCsv, elements.serverBtn, elements.exportFramesBtn, elements.stream, elements.offsetBtn, elements.linkTarget,
     elements.refreshBtn, elements.addUntagged, elements.addMarkerBtn, elements.syncBtn, elements.executeBtn];
   const offsetControls = [elements.offsetInput, elements.offsetMinusSec, elements.offsetPlusSec,
     elements.offsetMinusFrame, elements.offsetPlusFrame, elements.offsetReset];
@@ -83,6 +93,12 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
   let thumbDiskCacheReady = null;
   let thumbDiskCacheDir = '';
   const sourceMtimeCache = new Map();
+  // 同期元「サーバー」の状態 / State of the "server" sync source
+  const serverReady = typeof YTSServer !== 'undefined';
+  let serverBusy = false;
+  let serverLogin = '';
+  let serverStreams = [];
+  let serverMirrorCache = { path: null, value: false };
 
   thumbnailVideo.muted = true;
   thumbnailVideo.preload = 'auto';
@@ -150,6 +166,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     } else {
       text = '未紐付け: ' + activeInfo.name;
     }
+    // サーバーの鏡 CSV を開いているときは目印を付ける / Mark when a server mirror CSV is open
+    if (!failed && isServerMirror(csvFilePath)) text = 'サーバー / server · ' + text;
     elements.linkState.textContent = text;
     elements.linkState.title = text;
   }
@@ -400,6 +418,8 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     elements.pickCsv.disabled = busy;
     elements.newCsv.disabled = busy; // the active target is re-read when clicked
     elements.mergeCsv.disabled = busy || !csvFilePath;
+    elements.serverBtn.disabled = busy || !serverReady;
+    updateServerControls();
     elements.exportFramesBtn.disabled = busy || !lastMarkerDetails || !lastMarkerDetails.markers.length;
     elements.exportFramesBtn.title = '全マーカーを画像で書き出す（保存先を選択）';
     elements.refreshBtn.disabled = busy;
@@ -1978,10 +1998,254 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     }
   }
 
+  // ---- 同期元「サーバー」: 設定・配信ピッカー・鏡 CSV --------------------------
+  // ---- "server" sync source: settings, stream picker, mirror CSV ---------------
+
+  // 鏡 CSV の置き場の根（USER_DATA/yato-twitch-timestamp） / Root folder of mirror CSVs (USER_DATA/yato-twitch-timestamp)
+  function serverBaseDir() {
+    return String(cs.getSystemPath(SystemPath.USER_DATA) || '').replace(/\\/g, '/') + '/yato-twitch-timestamp';
+  }
+
+  // フォルダを 1 段ずつ作る（ensureThumbDiskCache と同じ手順） / Creates a folder level by level (same steps as ensureThumbDiskCache)
+  function makeDirs(dir) {
+    const parts = String(dir || '').replace(/\\/g, '/').split('/');
+    let current = '';
+    parts.forEach(function (part, index) {
+      if (!part) {
+        if (index === 0) current = '/';
+        return;
+      }
+      current = current && current !== '/' ? current + '/' + part : current + part;
+      window.cep.fs.makedir(current);
+    });
+    if (!pathExists(dir)) throw new Error('鏡 CSV のフォルダを作れませんでした / Could not create the mirror folder: ' + dir);
+  }
+
+  // 鏡 CSV の横の <stream_id>.server.json / The <stream_id>.server.json next to a mirror CSV
+  function serverMetaPath(csvPath) {
+    return String(csvPath || '').replace(/_sync\.csv$/i, '').replace(/\.csv$/i, '') + '.server.json';
+  }
+
+  // meta が読めて形が正しければ返す。無い・壊れていれば null / Returns the meta when readable and well-formed; null otherwise
+  function readServerMeta(csvPath) {
+    const metaPath = serverMetaPath(csvPath);
+    if (!csvPath || !pathExists(metaPath)) return null;
+    try {
+      const meta = JSON.parse(readText(metaPath));
+      return TSLib.isServerMeta(meta) ? meta : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeServerMeta(csvPath, meta) {
+    atomicWrite(serverMetaPath(csvPath), JSON.stringify(meta, null, 2) + '\n');
+    serverMirrorCache = { path: null, value: false };
+  }
+
+  // 開いている CSV がサーバーの鏡か（パスごとに 1 度だけ確かめる） / Whether a CSV is a server mirror (checked once per path)
+  function isServerMirror(csvPath) {
+    if (!csvPath) return false;
+    if (serverMirrorCache.path !== csvPath) serverMirrorCache = { path: csvPath, value: !!readServerMeta(csvPath) };
+    return serverMirrorCache.value;
+  }
+
+  function selectedServerStream() {
+    const streamId = elements.serverStream.value;
+    return serverStreams.find(function (stream) { return stream.stream_id === streamId; }) || null;
+  }
+
+  function updateServerControls() {
+    const locked = serverBusy || busy || !serverReady;
+    elements.serverConnect.disabled = locked;
+    elements.serverChannel.disabled = locked || !elements.serverChannel.options.length;
+    elements.serverStream.disabled = locked || !serverStreams.length;
+    elements.serverOpen.disabled = locked || !selectedServerStream();
+  }
+
+  function setServerBusy(value) {
+    serverBusy = value;
+    updateServerControls();
+  }
+
+  function closeServerPopover() {
+    elements.serverPopover.hidden = true;
+    elements.serverBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  // 配信の行: YYYY-MM-DD HH:mm · タイトル · スタンプ n / A stream row: YYYY-MM-DD HH:mm · title · stamps n
+  function serverStreamLabel(stream) {
+    const date = new Date(stream.started_at);
+    const pad = function (value) { return String(value).padStart(2, '0'); };
+    const when = Number.isFinite(date.getTime())
+      ? date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+      : '開始時刻不明 / unknown start';
+    return when + ' · ' + (stream.title || stream.stream_id) + ' · スタンプ ' + (Number(stream.stamp_count) || 0);
+  }
+
+  async function loadServerStreams() {
+    const channel = elements.serverChannel.value;
+    serverStreams = [];
+    clearChildren(elements.serverStream);
+    updateServerControls();
+    if (!channel) return;
+    setServerBusy(true);
+    try {
+      serverStreams = await YTSServer.listStreams(channel);
+      serverStreams.forEach(function (stream) {
+        const option = document.createElement('option');
+        option.value = stream.stream_id;
+        option.textContent = serverStreamLabel(stream);
+        option.title = option.textContent;
+        elements.serverStream.appendChild(option);
+      });
+      if (!serverStreams.length) setStatus(channel + ': サーバーに配信がありません / No streams on the server', '');
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  // 設定を保存して /api/me で確かめ、会員のチャンネルを並べる / Saves the settings, checks them with /api/me, and lists member channels
+  async function connectServer() {
+    try {
+      YTSServer.saveSettings({ serverUrl: elements.serverUrl.value, token: elements.serverToken.value });
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+      return;
+    }
+    elements.serverUrl.value = YTSServer.loadSettings().serverUrl;
+    elements.serverPicker.hidden = true;
+    serverStreams = [];
+    clearChildren(elements.serverChannel);
+    clearChildren(elements.serverStream);
+    setServerBusy(true);
+    let me;
+    try {
+      me = await YTSServer.me();
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+      return;
+    } finally {
+      setServerBusy(false);
+    }
+    serverLogin = String((me && me.login) || '');
+    const channels = me && Array.isArray(me.channels) ? me.channels : [];
+    channels.forEach(function (channel) {
+      const option = document.createElement('option');
+      option.value = channel.login;
+      option.textContent = channel.login + (channel.role ? '（' + channel.role + '）' : '');
+      elements.serverChannel.appendChild(option);
+    });
+    elements.serverPicker.hidden = false;
+    updateServerControls();
+    if (!channels.length) {
+      setStatus(serverLogin + ': 会員のチャンネルがありません / Not a member of any channel', 'error');
+      return;
+    }
+    setStatus(serverLogin + ' としてサーバーに接続しました / Connected to the server as ' + serverLogin, 'ok');
+    await loadServerStreams();
+  }
+
+  // サーバーの記録を鏡 CSV に取り込み、meta を書いて、その CSV を開く
+  // Merges the server records into the mirror CSV, writes the meta, and opens that CSV.
+  async function openServerStream(stream) {
+    const settings = YTSServer.loadSettings();
+    let mirrorPath = '';
+    let merged = null;
+    setBusy(true);
+    try {
+      mirrorPath = TSLib.serverMirrorPath(serverBaseDir(), settings.serverUrl, stream.stream_id);
+      makeDirs(dirname(mirrorPath));
+      const serverRecords = await YTSServer.pullStamps(stream.stream_id);
+      const exists = pathExists(mirrorPath);
+      const localRecords = exists ? TSLib.parseCsv(readText(mirrorPath)).records : [];
+      merged = TSLib.mergeServerRecords(localRecords, serverRecords);
+      if (merged.changed || !exists) atomicWrite(mirrorPath, TSLib.toCsv(merged.records));
+      const previous = readServerMeta(mirrorPath);
+      writeServerMeta(mirrorPath, {
+        serverUrl: settings.serverUrl,
+        stream_id: stream.stream_id,
+        channel: stream.channel || elements.serverChannel.value,
+        started_at: stream.started_at || '',
+        title: stream.title || '',
+        lastPullAt: new Date().toISOString(),
+        lastPushAt: previous && previous.lastPushAt ? previous.lastPushAt : '',
+        me: serverLogin
+      });
+    } catch (error) {
+      setStatus(messageOf(error), 'error');
+      return;
+    } finally {
+      setBusy(false);
+    }
+    closeServerPopover();
+    await loadCsvPath(mirrorPath, true);
+    if (csvFilePath === mirrorPath && groups.length) {
+      setStatus('サーバー / server: ' + serverStreamLabel(stream) + '（取り込み ' + merged.changed + ' 件 / ' +
+        merged.changed + ' merged）', 'ok');
+    }
+    await refreshMarkers();
+  }
+
+  function openServerPopover() {
+    const settings = YTSServer.loadSettings();
+    elements.serverPopover.hidden = false;
+    elements.serverBtn.setAttribute('aria-expanded', 'true');
+    if (!elements.serverUrl.value) elements.serverUrl.value = settings.serverUrl;
+    if (!elements.serverToken.value) elements.serverToken.value = settings.token;
+    updateServerControls();
+    // 設定済みならそのまま配信ピッカーへ。未設定なら入力欄へ
+    // With saved settings, go straight to the stream picker; otherwise focus the inputs.
+    if (settings.serverUrl && settings.token) {
+      if (elements.serverPicker.hidden && !serverBusy) connectServer();
+    } else {
+      (settings.serverUrl ? elements.serverToken : elements.serverUrl).focus();
+    }
+  }
+
+  function bindServerEvents() {
+    elements.serverBtn.addEventListener('click', function () {
+      if (elements.serverPopover.hidden) openServerPopover();
+      else closeServerPopover();
+    });
+    elements.serverClose.addEventListener('click', closeServerPopover);
+    elements.serverConnect.addEventListener('click', connectServer);
+    elements.serverChannel.addEventListener('change', loadServerStreams);
+    elements.serverStream.addEventListener('change', updateServerControls);
+    elements.serverOpen.addEventListener('click', function () {
+      const stream = selectedServerStream();
+      if (stream) openServerStream(stream);
+    });
+    // 入力中のキーを Premiere / AE のショートカットに渡さない。Enter で接続
+    // Keep typed keys away from Premiere / AE shortcuts; Enter connects.
+    [elements.serverUrl, elements.serverToken].forEach(function (input) {
+      ['keydown', 'keyup', 'keypress'].forEach(function (eventName) {
+        input.addEventListener(eventName, function (event) {
+          event.stopPropagation();
+          if (eventName === 'keydown' && (event.isComposing || event.keyCode === 229)) return;
+          if (eventName === 'keydown' && event.key === 'Enter') {
+            event.preventDefault();
+            if (!elements.serverConnect.disabled) connectServer();
+          }
+        });
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !elements.serverPopover.hidden) closeServerPopover();
+    });
+    document.addEventListener('click', function (event) {
+      if (!elements.serverPopover.hidden && !elements.serverPopover.contains(event.target) &&
+          !elements.serverBtn.contains(event.target)) closeServerPopover();
+    });
+  }
+
   function bindEvents() {
     elements.newCsv.addEventListener('click', createCsvFromTarget);
     elements.pickCsv.addEventListener('click', pickCsv);
     elements.mergeCsv.addEventListener('click', pickMergeCsv);
+    if (serverReady) bindServerEvents();
     elements.exportFramesBtn.addEventListener('click', exportAllFrames);
     elements.refreshBtn.addEventListener('click', async function () {
       await refreshTarget(true);
