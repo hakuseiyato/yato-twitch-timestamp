@@ -251,15 +251,28 @@ cs.evalScript('$.evalFile(' + JSON.stringify(extPath + '/jsx/' + (hostApp === 'P
     } catch (error) {}
     setBusy(true);
     try {
-      const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, binName: 'Peakaboo_Shorts', prefix: 'Short_' }) + ')', true);
+      // 日付 YYMMDD は配信の開始日（JST）。無ければ ExtendScript 側が Sequence 名の先頭 6 桁を使う
+      // The YYMMDD date is the stream's start day (JST); without it the ExtendScript side uses the sequence name's leading 6 digits.
+      const group = selectedGroup();
+      const out = await callHost('ytsCreateShorts(' + hostLiteral({ preSec: pre, postSec: post, includeHuman: elements.shortsIncludeHuman.checked, dateTag: dateTagOf(group && group.started_at), parentBin: 'Sequence' }) + ')', true);
       // skipped = 範囲が取れない、または Sequence を作れなかったマーカー / skipped = markers with no usable range or whose sequence could not be created
       if (!out.created) {
         setStatus('候補マーカーがありません' + (out.skipped ? '（' + out.skipped + ' 件はスキップ）' : ''), '');
       } else {
-        setStatus(out.created + ' 件の Sequence を作成しました（Peakaboo_Shorts）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : ''), 'ok');
+        setStatus(out.created + ' 件の Sequence を作成しました（' + (out.bin || 'Peakaboo_Shorts') + '）' + (out.skipped ? '、' + out.skipped + ' 件はスキップ' : ''), 'ok');
       }
       closeShortsPopover();
     } catch (error) { setStatus(messageOf(error), 'error'); } finally { setBusy(false); }
+  }
+
+  // ISO の開始時刻を JST の YYMMDD にする（読めなければ ''）/ ISO start time -> YYMMDD in JST ('' when unreadable)
+  function dateTagOf(startedAt) {
+    const date = new Date(startedAt || '');
+    if (!Number.isFinite(date.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', year: '2-digit', month: '2-digit', day: '2-digit' }).formatToParts(date);
+    const pick = function (type) { const part = parts.find(function (q) { return q.type === type; }); return part ? part.value : ''; };
+    const tag = pick('year') + pick('month') + pick('day');
+    return /^\d{6}$/.test(tag) ? tag : '';
   }
 
   function hostLiteral(value) {

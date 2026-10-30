@@ -757,6 +757,12 @@ function ytsCreateShorts(p) {
     var bin = null;
     var root;
     var child;
+    var dateTag;
+    var namePrefix;
+    var parentBinName;
+    var parentBin;
+    var binPath;
+    var origId;
     // Premiere 26 で確実に効くのは ticks で作った Time / A Time built from ticks is the form known to work in Premiere 26.
     var toTime = function (sec) {
         var t = new Time();
@@ -770,8 +776,18 @@ function ytsCreateShorts(p) {
     if (!isFinite(preSec) || preSec < 0 || !isFinite(postSec) || postSec <= 0) {
         return "ERR|前後の秒数を確認してください";
     }
-    binName = String(p.binName || "Peakaboo_Shorts");
+    // 日付 YYMMDD は配信の開始日（パネルから）→ 無ければ元 Sequence 名の先頭 6 桁。プロジェクトの慣例 `Sequence/_YYMMDD/YYMMDD_…` に合わせる
+    // The YYMMDD date comes from the stream start (panel), else the sequence name's leading 6 digits, matching the project's `Sequence/_YYMMDD/YYMMDD_…` convention.
+    dateTag = String(p.dateTag || "");
+    if (!/^[0-9]{6}$/.test(dateTag)) {
+        dateTag = /^([0-9]{6})[_-]/.test(String(seq.name)) ? String(seq.name).substring(0, 6) : "";
+    }
+    namePrefix = dateTag ? dateTag + "_" : "";
+    binName = dateTag ? "_" + dateTag : String(p.binName || "Peakaboo_Shorts");
+    parentBinName = dateTag ? String(p.parentBin || "Sequence") : "";
+    binPath = (parentBinName ? parentBinName + "/" : "") + binName;
     try {
+        origId = String(seq.sequenceID);
         origIn = parseFloat(seq.getInPoint());
         origOut = parseFloat(seq.getOutPoint());
         seqEndSec = parseFloat(seq.end) / TICKS_PER_SEC;
@@ -796,10 +812,10 @@ function ytsCreateShorts(p) {
                 continue;
             }
             n = created + 1;
-            name = ytsShortName(targets[i].name, n);
+            name = namePrefix + ytsShortName(targets[i].name, n);
             while (usedNames["n_" + name]) {
                 n += 1;
-                name = ytsShortName(targets[i].name, n);
+                name = namePrefix + ytsShortName(targets[i].name, n);
             }
             // In を 2 回置くのは、前の Out より後ろの In が弾かれないようにするため
             // In is set twice so a new In past the previous Out is not rejected.
@@ -829,19 +845,34 @@ function ytsCreateShorts(p) {
             } catch (markerError) {}
 
             if (!bin) {
+                // 親 bin（既定 Sequence）があればその下、無ければルートに日付 bin を置く / Under the parent bin (default Sequence) when it exists, else at the root
                 root = app.project.rootItem;
-                for (j = 0; j < root.children.numItems; j += 1) {
-                    child = root.children[j];
+                parentBin = null;
+                if (parentBinName) {
+                    for (j = 0; j < root.children.numItems; j += 1) {
+                        child = root.children[j];
+                        if (child && child.type === ProjectItemType.BIN && child.name === parentBinName) {
+                            parentBin = child;
+                            break;
+                        }
+                    }
+                }
+                if (!parentBin) {
+                    parentBin = root;
+                    binPath = binName;
+                }
+                for (j = 0; j < parentBin.children.numItems; j += 1) {
+                    child = parentBin.children[j];
                     if (child && child.type === ProjectItemType.BIN && child.name === binName) {
                         bin = child;
                         break;
                     }
                 }
-                if (!bin) bin = root.createBin(binName) || null;
+                if (!bin) bin = parentBin.createBin(binName) || null;
             }
             if (bin && sub.projectItem) sub.projectItem.moveBin(bin);
         }
-        result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped });
+        result = "OK|" + ytsJson({ created: created, names: names, skipped: skipped, bin: binPath });
     } catch (e) {
         result = "ERR|" + created + " 件作成後に失敗: " + e.toString();
     } finally {
@@ -856,8 +887,10 @@ function ytsCreateShorts(p) {
                 if (origOut < 0) seq.setOutPoint(-400000); else seq.setOutPoint(toTime(origOut));
             } catch (restoreFailure) { restoreError = restoreFailure; }
         }
-        // createSubsequence が新しい Sequence を開く場合に備えて元へ戻す / Switch back in case createSubsequence opened the new sequence.
-        try { app.project.activeSequence = seq; } catch (activateError) {}
+        // createSubsequence は新しい Sequence をアクティブにするので元へ戻す。`activeSequence =` の代入は PPro 26.5 で効かなかったため openSequence(ID) を使う
+        // createSubsequence activates the new sequence, so switch back. Assigning `activeSequence =` did nothing on PPro 26.5, hence openSequence(ID).
+        try { if (origId) app.project.openSequence(origId); } catch (activateError) {}
+        try { if (app.project.activeSequence && String(app.project.activeSequence.sequenceID) !== origId) app.project.activeSequence = seq; } catch (activateError2) {}
     }
     if (restoreError) {
         return "ERR|" + created + " 件作成しましたが In/Out を戻せませんでした: " + restoreError.toString();
