@@ -353,9 +353,10 @@ select.inline:hover { border-bottom-color: var(--ink); }
 .streams .t a.untitled { color: var(--ink-2); font-weight: 400; }
 .streams .chat { white-space: nowrap; }
 .streams th.num, .streams td.num { color: var(--ink-2); text-align: right; }
-/* 行のどこを押してもタイトルのリンクで開く（JS なし）/ Clicking anywhere on a row follows the title link (no JS) */
-.streams tbody tr { position: relative; cursor: pointer; }
-.streams .t a::after { content: ""; position: absolute; inset: 0; }
+/* 行のどこを押してもタイトルのリンクで開く / Clicking anywhere on a row follows the title link */
+/* 遷移は index.js の tbody の click 委譲が行う（CSS の ::after 方式は旧 Safari で tr の position が効かず、行の外を覆うため使わない）
+   Navigation is done by the delegated tbody click in index.js (no ::after stretch: older Safari ignores position on tr, so it would cover the page) */
+.streams tbody tr { cursor: pointer; }
 .streams tr.is-new td { background: var(--sel); }
 .streams tr.is-new td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .stream-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }

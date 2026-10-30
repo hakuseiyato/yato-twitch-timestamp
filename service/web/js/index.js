@@ -54,8 +54,23 @@
     return el('td', { class: 'chat muted', text: '未取り込み' });
   }
 
-  // 1 配信 = 1 行。行全体のクリックはタイトルのリンクを CSS で広げて受ける（app.css の .streams .t a::after）
-  // One stream per row. A click anywhere on the row lands on the title link, stretched by CSS (.streams .t a::after in app.css).
+  // 行のどこを押してもタイトルのリンク先へ移る（tbody に 1 つだけ付ける委譲の click）
+  // CSS で ::after を行に広げる方式は、旧 Safari（WebKit bug 240961）が tr の position: relative を無視し
+  // 最後の行のリンクがページ全体を覆うため使わない。キーボードはタイトルの <a>（Tab + Enter）で開く
+  // A click anywhere on a row follows the row's title link (one delegated click listener on the tbody).
+  // Not a CSS ::after stretch: older Safari (WebKit bug 240961) ignores position: relative on tr, so the
+  // last row's link would cover the whole page. Keyboard users open a stream with the title <a> (Tab + Enter).
+  function openRowFromClick(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (event.target.closest('a, button, input, select, label')) return;
+    const row = event.target.closest('tr');
+    if (!row || !event.currentTarget.contains(row)) return;
+    const link = row.querySelector('td.t a[href]');
+    if (link) location.assign(link.getAttribute('href'));
+  }
+
+  // 1 配信 = 1 行 / One stream per row
   function streamRow(stream, highlightId) {
     const title = stream.title || '';
     return el('tr', {
@@ -78,6 +93,7 @@
     const list = $('stream-list');
     const status = $('streams-status');
     if (!channel) return;
+    $('streams-count').textContent = '';
     setStatus(status, '読み込み中…');
     let data;
     try {
@@ -100,7 +116,7 @@
         el('th', { scope: 'col', text: 'チャット' }),
         el('th', { scope: 'col', class: 'num', text: 'スタンプ' })
       ])),
-      el('tbody', null, streams.map(function (s) { return streamRow(s, highlightId); }))
+      el('tbody', { onclick: openRowFromClick }, streams.map(function (s) { return streamRow(s, highlightId); }))
     ])));
     if (highlightId) {
       const row = list.querySelector('.is-new');
